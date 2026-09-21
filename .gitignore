@@ -6,4 +6,5 @@ coverage
 apps/api/prisma/dev.db
 apps/api/uploads
 *.log
-
+提示词.md
+需求.md
