@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+enum CheckInStatus {
+  NOT_CHECKED
+  EMAIL_SENT
+  REVIEWING
+  APPROVED
+  REJECTED
+  EMAIL_ERROR
+}
+
+model User {
+  id        String    @id @default(cuid()) @db.VarChar(30)
+  studentId String    @unique @db.VarChar(64)
+  name      String    @db.VarChar(100)
+  role      String    @db.VarChar(32)
+  classId   String    @db.VarChar(100)
+  checkIns  CheckIn[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Task {
+  id            String       @id @default(cuid()) @db.VarChar(30)
+  title         String       @db.VarChar(200)
+  startTime     DateTime
+  endTime       DateTime
+  targetEmail   String       @db.VarChar(320)
+  gestureImgUrl String?      @db.VarChar(2048)
+  centerLat     Float
+  centerLng     Float
+  radius        Int          @default(800)
+  status        TaskStatus   @default(NOT_STARTED)
+  checkIns      CheckIn[]
+  emailLogs     EmailLog[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model CheckIn {
+  id              String        @id @default(cuid()) @db.VarChar(30)
+  taskId          String        @db.VarChar(30)
+  userId          String        @db.VarChar(30)
+  status          CheckInStatus @default(NOT_CHECKED)
+  photoUrl        String?       @db.VarChar(2048)
+  lat             Float?
+  lng             Float?
+  address         String?       @db.VarChar(300)
+  emailSubject    String?       @db.VarChar(320)
+  emailReceivedAt DateTime?
+  rejectReason    String?       @db.VarChar(300)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId, status])
+  @@index([userId, createdAt])
+}
+
+model EmailLog {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  taskId      String   @db.VarChar(30)
+  messageId   String   @unique @db.VarChar(320)
+  subject     String   @db.VarChar(320)
+  parseStatus String   @db.VarChar(32)
+  errorMsg    String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+}

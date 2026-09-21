@@ -1,0 +1,1 @@
+{"root":["./src/dashboard.tsx","./src/main.tsx","./src/register-service-worker.ts","./src/types.ts","./src/vite-env.d.ts","./src/hooks/use-camera.ts","./src/hooks/use-geolocation.ts","./src/hooks/use-watermark-preview.ts","./src/lib/geo.ts","./src/lib/watermark.ts","./src/store/check-in-store.ts"],"version":"5.9.3"}

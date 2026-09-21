@@ -1,0 +1,18 @@
+{
+  "name": "attendance-bonus",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @attendance/api\" \"npm run dev -w @attendance/web\"",
+    "build": "npm run build -w @attendance/api && npm run build -w @attendance/web",
+    "lint": "npm run lint -w @attendance/api && npm run lint -w @attendance/web",
+    "test": "npm run test -w @attendance/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
+
