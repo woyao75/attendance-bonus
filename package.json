@@ -6,13 +6,28 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @attendance/api\" \"npm run dev -w @attendance/web\"",
+    "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w @attendance/api\" \"npm run dev -w @attendance/web\" \"npm run worker -w @attendance/api\"",
+    "local": "npm run dev",
     "build": "npm run build -w @attendance/api && npm run build -w @attendance/web",
     "lint": "npm run lint -w @attendance/api && npm run lint -w @attendance/web",
-    "test": "npm run test -w @attendance/api"
+    "test": "npm run test -w @attendance/api",
+    "test:browser": "node scripts/test-browser.mjs",
+    "test:pwa": "node scripts/test-pwa.mjs",
+    "test:upgrade": "node scripts/test-upgrade.mjs"
+  },
+  "overrides": {
+    "@types/express": "$@types/express",
+    "@types/express-serve-static-core": "$@types/express-serve-static-core",
+    "deepmerge-ts": "$deepmerge-ts",
+    "uuid": "$uuid"
   },
   "devDependencies": {
+    "deepmerge-ts": "^8.0.2",
+    "uuid": "^11.1.1",
+    "prettier": "^3.6.2",
+    "@playwright/test": "^1.63.0",
+    "@types/express": "^4.17.21",
+    "@types/express-serve-static-core": "^4.19.6",
     "concurrently": "^9.1.2"
   }
 }
-

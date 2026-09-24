@@ -1,0 +1,93 @@
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: attendance_bonus
+      MYSQL_USER: attendance
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+  migrate:
+    build: { context: ., target: api }
+    env_file: .env.production
+    environment:
+      DATABASE_URL: mysql://attendance:${DB_PASSWORD}@db:3306/attendance_bonus
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      db: { condition: service_healthy }
+    logging: *logging
+  api:
+    build: { context: ., target: api }
+    restart: unless-stopped
+    env_file: .env.production
+    environment: &api_env
+      DATABASE_URL: mysql://attendance:${DB_PASSWORD}@db:3306/attendance_bonus
+      NODE_ENV: production
+      APP_ORIGINS: https://${DOMAIN}
+      UPLOAD_DIR: /app/apps/api/uploads
+      AGENT_STATUS_FILE: /app/apps/api/uploads/agent-status.json
+      TRUST_PROXY: "1"
+    volumes: ["photos:/app/apps/api/uploads"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+  worker:
+    build: { context: ., target: api }
+    restart: unless-stopped
+    env_file: .env.production
+    environment: *api_env
+    command: ["node", "dist/worker.js"]
+    volumes: ["photos:/app/apps/api/uploads"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const fs=require('fs');try{const s=JSON.parse(fs.readFileSync(process.env.AGENT_STATUS_FILE));process.exit(Date.now()-new Date(s.heartbeatAt).getTime()<180000?0:1)}catch{process.exit(1)}",
+        ]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+  web:
+    build: { context: ., target: web }
+    restart: unless-stopped
+    environment: { DOMAIN: "${DOMAIN:?set DOMAIN}" }
+    ports: ["80:80", "443:443"]
+    volumes: ["caddy_data:/data", "caddy_config:/config"]
+    depends_on:
+      api: { condition: service_healthy }
+    logging: *logging
+volumes:
+  mysql_data:
+  photos:
+  caddy_data:
+  caddy_config:

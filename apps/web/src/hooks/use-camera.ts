@@ -20,13 +20,17 @@ export function useCamera() {
       setError("当前浏览器不支持相机访问");
       return;
     }
+    setError(undefined);
+    stop();
+    const requestId = requestIdRef.current;
     try {
-      setError(undefined);
-      stop();
-      const requestId = requestIdRef.current;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        video: {
+          facingMode: { exact: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
       });
       if (requestId !== requestIdRef.current) {
         stream.getTracks().forEach((track) => track.stop());
@@ -38,7 +42,12 @@ export function useCamera() {
         await videoRef.current.play();
       }
     } catch {
-      setError("无法启动后置摄像头，请确认相机权限和设备支持情况");
+      if (requestId === requestIdRef.current) {
+        stop();
+        setError(
+          "无法启动后置摄像头，请确认 HTTPS、相机权限及后置摄像头是否可用",
+        );
+      }
     }
   }, [stop]);
 

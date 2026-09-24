@@ -6,7 +6,7 @@ export function haversineDistanceMeters(
   fromLat: number,
   fromLng: number,
   toLat: number,
-  toLng: number
+  toLng: number,
 ): number {
   const deltaLat = toRadians(toLat - fromLat);
   const deltaLng = toRadians(toLng - fromLng);
@@ -15,7 +15,9 @@ export function haversineDistanceMeters(
 
   const a =
     Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(fromLatRadians) * Math.cos(toLatRadians) * Math.sin(deltaLng / 2) ** 2;
+    Math.cos(fromLatRadians) *
+      Math.cos(toLatRadians) *
+      Math.sin(deltaLng / 2) ** 2;
 
   return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(a));
 }
@@ -25,8 +27,13 @@ export function isWithinGeofence(
   lng: number,
   centerLat: number,
   centerLng: number,
-  radiusMeters: number
+  radiusMeters: number,
 ): { distanceMeters: number; withinFence: boolean } {
-  const distanceMeters = haversineDistanceMeters(lat, lng, centerLat, centerLng);
+  const distanceMeters = haversineDistanceMeters(
+    lat,
+    lng,
+    centerLat,
+    centerLng,
+  );
   return { distanceMeters, withinFence: distanceMeters <= radiusMeters };
 }

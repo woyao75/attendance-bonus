@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/web-node.tsbuildinfo",
     "composite": true,
+    "noEmit": true,
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -8,4 +10,3 @@
   },
   "include": ["vite.config.ts"]
 }
-

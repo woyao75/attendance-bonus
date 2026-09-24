@@ -13,5 +13,5 @@ interface CheckInStore {
 export const useCheckInStore = create<CheckInStore>((set) => ({
   setTask: (task) => set({ task }),
   setCheckIn: (checkIn) => set({ checkIn }),
-  setLocation: (location) => set({ location })
+  setLocation: (location) => set({ location }),
 }));

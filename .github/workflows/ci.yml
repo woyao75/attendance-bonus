@@ -1,0 +1,35 @@
+name: verify
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-only-password
+          MYSQL_DATABASE: attendance_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost --silent"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test-only-password@127.0.0.1:3306/attendance_test
+      TEST_DATABASE_URL: mysql://root:test-only-password@127.0.0.1:3306/attendance_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run prisma:generate -w @attendance/api
+      - run: npm run db:deploy -w @attendance/api
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:upgrade
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm run test:pwa
+      - run: npm audit --omit=dev --registry=https://registry.npmjs.org
+      - run: docker build --target api .
+      - run: docker build --target web .

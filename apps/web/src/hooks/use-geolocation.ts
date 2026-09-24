@@ -14,13 +14,17 @@ export function useGeolocation() {
       (position) => {
         setError(undefined);
         setLocation({
+          timestamp: position.timestamp,
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-          accuracy: position.coords.accuracy
+          accuracy: position.coords.accuracy,
         });
       },
-      () => setError("定位失败，请开启精确位置权限"),
-      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 }
+      () => {
+        setLocation(undefined);
+        setError("定位失败，请开启精确位置权限");
+      },
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 },
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);

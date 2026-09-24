@@ -5,20 +5,24 @@ import { randomUUID } from "node:crypto";
 const extensionByMimeType: Record<string, string> = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
-  "image/webp": ".webp"
+  "image/webp": ".webp",
 };
 
 export class LocalPhotoStorage {
-  private readonly rootDir = path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
+  private get rootDir() {
+    return path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
+  }
 
   async saveCheckInPhoto(
     taskId: string,
     userId: string,
-    file: Pick<Express.Multer.File, "buffer" | "mimetype">
+    file: Pick<Express.Multer.File, "buffer" | "mimetype">,
   ): Promise<string> {
     const extension = extensionByMimeType[file.mimetype];
     if (!extension) {
-      throw Object.assign(new Error("照片格式仅支持 JPEG、PNG 或 WebP"), { statusCode: 400 });
+      throw Object.assign(new Error("照片格式仅支持 JPEG、PNG 或 WebP"), {
+        statusCode: 400,
+      });
     }
 
     const directory = path.join(this.rootDir, "check-ins", taskId, userId);

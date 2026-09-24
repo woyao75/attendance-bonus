@@ -6,5 +6,11 @@ coverage
 apps/api/prisma/dev.db
 apps/api/uploads
 *.log
+.local/
+*.tsbuildinfo
+apps/web/vite.config.js
+apps/web/vite.config.d.ts
+.env.production
+backups/
 提示词.md
 需求.md

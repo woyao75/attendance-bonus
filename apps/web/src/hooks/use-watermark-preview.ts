@@ -1,10 +1,14 @@
 import { useEffect } from "react";
-import { drawWatermark, estimateVideoLuminance, type WatermarkData } from "../lib/watermark";
+import {
+  drawWatermark,
+  estimateVideoLuminance,
+  type WatermarkData,
+} from "../lib/watermark";
 
 export function useWatermarkPreview(
   video: HTMLVideoElement | null,
   canvas: HTMLCanvasElement | null,
-  data: WatermarkData
+  data: WatermarkData,
 ) {
   useEffect(() => {
     if (!video || !canvas) return;
@@ -17,10 +21,14 @@ export function useWatermarkPreview(
           luminance = estimateVideoLuminance(video);
           lastSample = time;
         }
+        const width = video.videoWidth;
+        const height = video.videoHeight;
         const rect = video.getBoundingClientRect();
-        const pixelRatio = window.devicePixelRatio || 1;
-        const width = Math.max(1, Math.round(rect.width * pixelRatio));
-        const height = Math.max(1, Math.round(rect.height * pixelRatio));
+        const scale = Math.min(rect.width / width, rect.height / height);
+        canvas.style.width = `${width * scale}px`;
+        canvas.style.height = `${height * scale}px`;
+        canvas.style.left = `${(rect.width - width * scale) / 2}px`;
+        canvas.style.top = `${(rect.height - height * scale) / 2}px`;
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
           canvas.height = height;

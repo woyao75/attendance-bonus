@@ -1,201 +1,229 @@
-import type { Request } from "express";
 import { Router } from "express";
+import type { CheckIn } from "@prisma/client";
 import multer from "multer";
+import sharp from "sharp";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { isWithinGeofence } from "../lib/geo.js";
 import { prisma } from "../lib/prisma.js";
+import { isWithinGeofence } from "../lib/geo.js";
 import { photoStorage } from "../lib/storage.js";
-import { sendCheckInMail } from "../services/check-in-mailer.js";
-
+import { accessibleTask, roles } from "../middleware/auth.js";
+import { fail, route } from "../lib/http.js";
+import { createMailBody } from "../services/check-in-mailer.js";
+export const checkInRouter = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
-  fileFilter: (_request, file, callback) => {
-    callback(null, ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype));
-  }
+  limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 8, parts: 9 },
 });
-
-const checkInSchema = z.object({
+const numberField = z
+  .string()
+  .trim()
+  .min(1)
+  .transform(Number)
+  .pipe(z.number().finite());
+const inputSchema = z.object({
   taskId: z.string().cuid(),
-  userId: z.string().cuid(),
-  lat: z.coerce.number().gte(-90).lte(90),
-  lng: z.coerce.number().gte(-180).lte(180),
-  address: z.string().trim().max(300).optional()
+  lat: numberField.pipe(z.number().min(-90).max(90)),
+  lng: numberField.pipe(z.number().min(-180).max(180)),
+  accuracy: numberField.pipe(z.number().min(0).max(200)),
+  capturedAt: z.string().datetime(),
+  address: z.string().trim().max(300).optional(),
 });
-
-function requirePhoto(request: Request): Express.Multer.File {
-  if (!request.file) {
-    throw Object.assign(new Error("必须使用相机拍摄并提交照片"), { statusCode: 400 });
-  }
-  return request.file;
-}
-
-export const checkInRouter = Router();
-
-checkInRouter.get("/", async (request, response, next) => {
-  try {
-    const query = z.object({ taskId: z.string().cuid(), userId: z.string().cuid() }).parse(request.query);
-    const checkIn = await prisma.checkIn.findUnique({
-      where: { taskId_userId: query },
-      select: {
-        id: true,
-        status: true,
-        photoUrl: true,
-        lat: true,
-        lng: true,
-        address: true,
-        rejectReason: true,
-        createdAt: true
-      }
+const view = (c: CheckIn | null) =>
+  c
+    ? { ...c, photoUrl: c.photoUrl ? `/api/check-ins/${c.id}/photo` : null }
+    : null;
+checkInRouter.get(
+  "/",
+  roles("STUDENT"),
+  route(async (req, res) => {
+    const taskId = z.string().cuid().parse(req.query.taskId);
+    await accessibleTask(req.auth, taskId);
+    res.json({
+      checkIn: view(
+        await prisma.checkIn.findUnique({
+          where: { taskId_userId: { taskId, userId: req.auth.id } },
+        }),
+      ),
     });
-    response.json({ checkIn });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      response.status(400).json({ message: "查询参数不合法" });
-      return;
-    }
-    next(error);
-  }
-});
-
-checkInRouter.patch("/:checkInId/review", async (request, response, next) => {
-  try {
-    const checkInId = z.string().cuid().parse(request.params.checkInId);
-    const payload = z
+  }),
+);
+checkInRouter.get(
+  "/:id/photo",
+  route(async (req, res) => {
+    const c = await prisma.checkIn.findUnique({ where: { id: req.params.id } });
+    if (
+      !c?.photoUrl ||
+      (req.auth.role === "STUDENT" && c.userId !== req.auth.id)
+    )
+      throw fail(404, "照片不存在或无权访问");
+    await accessibleTask(req.auth, c.taskId);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.sendFile(photoStorage.resolvePublicUrl(c.photoUrl));
+  }),
+);
+checkInRouter.patch(
+  "/:id/review",
+  roles("ADMIN", "COUNSELOR"),
+  route(async (req, res) => {
+    const input = z
       .object({
         status: z.enum(["APPROVED", "REJECTED"]),
-        rejectReason: z.string().trim().min(1).max(300).optional()
+        rejectReason: z.string().trim().max(300).optional(),
       })
-      .superRefine((value, context) => {
-        if (value.status === "REJECTED" && !value.rejectReason) {
-          context.addIssue({ code: z.ZodIssueCode.custom, message: "驳回必须填写原因", path: ["rejectReason"] });
-        }
-      })
-      .parse(request.body);
-    const checkIn = await prisma.checkIn.findUnique({ where: { id: checkInId } });
-    if (!checkIn) {
-      response.status(404).json({ message: "打卡记录不存在" });
-      return;
-    }
-    if (checkIn.status !== "REVIEWING") {
-      response.status(409).json({ message: "仅审核中的打卡可以审批" });
-      return;
-    }
-    const updated = await prisma.checkIn.update({
-      where: { id: checkInId },
-      data: {
-        status: payload.status,
-        rejectReason: payload.status === "REJECTED" ? payload.rejectReason : null
-      }
+      .refine(
+        (v) => v.status !== "REJECTED" || Boolean(v.rejectReason),
+        "驳回必须填写原因",
+      )
+      .parse(req.body);
+    const c = await prisma.checkIn.findUnique({ where: { id: req.params.id } });
+    if (!c) throw fail(404, "记录不存在");
+    const task = await accessibleTask(req.auth, c.taskId, true);
+    if (task.status === "ARCHIVED") throw fail(409, "归档任务不能修改");
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.checkIn.updateMany({
+        where: { id: c.id, status: "REVIEWING", attemptId: c.attemptId },
+        data: {
+          status: input.status,
+          rejectReason: input.status === "REJECTED" ? input.rejectReason : null,
+        },
+      });
+      if (!result.count) throw fail(409, "记录已更新，请刷新后再审核");
+      await tx.auditLog.create({
+        data: { actorId: req.auth.id, action: input.status, targetId: c.id },
+      });
     });
-    response.json({ checkIn: updated });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      response.status(400).json({ message: "审核参数不合法", issues: error.flatten() });
-      return;
-    }
-    next(error);
-  }
-});
-
-checkInRouter.post("/", upload.single("photo"), async (request, response, next) => {
-  let savedPhotoUrl: string | undefined;
-  try {
-    const payload = checkInSchema.parse(request.body);
-    const photo = requirePhoto(request);
-    const [task, user] = await Promise.all([
-      prisma.task.findUnique({ where: { id: payload.taskId } }),
-      prisma.user.findUnique({ where: { id: payload.userId } })
-    ]);
-
-    if (!task) {
-      response.status(404).json({ message: "打卡任务不存在" });
-      return;
-    }
-    if (!user || user.role !== "student") {
-      response.status(403).json({ message: "仅学生账户可以提交打卡" });
-      return;
-    }
-
+    res.json({ ok: true });
+  }),
+);
+checkInRouter.post(
+  "/",
+  roles("STUDENT"),
+  upload.single("photo"),
+  route(async (req, res) => {
+    const input = inputSchema.parse(req.body);
+    const task = await accessibleTask(req.auth, input.taskId);
     const now = new Date();
-    if (task.status === "ARCHIVED" || task.status === "COMPLETED" || now < task.startTime || now > task.endTime) {
-      response.status(409).json({ message: "当前不在任务打卡时间内" });
-      return;
-    }
-
-    const geofence = isWithinGeofence(payload.lat, payload.lng, task.centerLat, task.centerLng, task.radius);
-    if (!geofence.withinFence) {
-      response.status(422).json({
-        message: "不在学校打卡范围内",
-        distanceMeters: Math.round(geofence.distanceMeters),
-        radiusMeters: task.radius
-      });
-      return;
-    }
-
-    savedPhotoUrl = await photoStorage.saveCheckInPhoto(task.id, user.id, photo);
-    const existing = await prisma.checkIn.findUnique({
-      where: { taskId_userId: { taskId: task.id, userId: user.id } }
-    });
-    const checkIn = await prisma.checkIn.upsert({
-      where: { taskId_userId: { taskId: task.id, userId: user.id } },
-      create: {
-        taskId: task.id,
-        userId: user.id,
-        photoUrl: savedPhotoUrl,
-        lat: payload.lat,
-        lng: payload.lng,
-        address: payload.address
-      },
-      update: {
-        photoUrl: savedPhotoUrl,
-        lat: payload.lat,
-        lng: payload.lng,
-        address: payload.address,
-        rejectReason: null,
-        status: "NOT_CHECKED"
-      }
-    });
-
-    if (existing?.photoUrl) await photoStorage.removeByPublicUrl(existing.photoUrl);
+    if (
+      task.status === "ARCHIVED" ||
+      task.status === "COMPLETED" ||
+      now < task.startTime ||
+      now > task.endTime
+    )
+      throw fail(409, "当前不在任务打卡时间内");
+    const capturedAt = new Date(input.capturedAt);
+    if (
+      capturedAt.getTime() > Date.now() + 30_000 ||
+      capturedAt.getTime() < Date.now() - 5 * 60_000
+    )
+      throw fail(400, "照片已超过 5 分钟，请重新拍摄并确认设备时间");
+    const fence = isWithinGeofence(
+      input.lat,
+      input.lng,
+      task.centerLat,
+      task.centerLng,
+      task.radius,
+    );
+    if (!fence.withinFence) throw fail(422, "不在学校打卡范围内");
+    if (!req.file) throw fail(400, "请提交相机照片");
+    let buffer: Buffer;
     try {
-      const sent = await sendCheckInMail({ task, user, checkIn });
-      const emailSentCheckIn = await prisma.checkIn.update({
-        where: { id: checkIn.id },
-        data: { status: "EMAIL_SENT", emailSubject: sent.subject }
+      const image = sharp(req.file.buffer, {
+        limitInputPixels: 20_000_000,
+        failOn: "error",
       });
-      response.status(201).json({
-        checkIn: emailSentCheckIn,
-        distanceMeters: Math.round(geofence.distanceMeters),
-        message: "打卡邮件已发送，等待系统审核"
-      });
-    } catch (error) {
-      const failedCheckIn = await prisma.checkIn.update({
-        where: { id: checkIn.id },
-        data: { status: "EMAIL_ERROR" }
-      });
-      response.status(502).json({
-        checkIn: failedCheckIn,
-        distanceMeters: Math.round(geofence.distanceMeters),
-        message: "照片已保存，但打卡邮件发送失败，请稍后重新提交"
-      });
+      const meta = await image.metadata();
+      if (
+        !["jpeg", "png", "webp"].includes(meta.format ?? "") ||
+        (meta.pages ?? 1) > 1
+      )
+        throw new Error("format");
+      buffer = await image.rotate().jpeg({ quality: 92 }).toBuffer();
+    } catch {
+      throw fail(400, "照片损坏、像素过大或格式不支持");
     }
-  } catch (error) {
-    if (savedPhotoUrl) await photoStorage.removeByPublicUrl(savedPhotoUrl);
-    if (error instanceof z.ZodError) {
-      response.status(400).json({ message: "打卡参数不合法", issues: error.flatten() });
-      return;
+    const member = await prisma.taskMember.findUniqueOrThrow({
+      where: { taskId_userId: { taskId: task.id, userId: req.auth.id } },
+    });
+    const attemptId = randomUUID();
+    const photoHash = createHash("sha256").update(buffer).digest("hex");
+    const subject = `[打卡]${member.studentId}_${member.name}_${task.id}`;
+    const body = createMailBody({
+      taskId: task.id,
+      userId: req.auth.id,
+      attemptId,
+      lat: input.lat,
+      lng: input.lng,
+      time: capturedAt.toISOString(),
+      photoHash,
+    });
+    const photoUrl = await photoStorage.saveCheckInPhoto(task.id, req.auth.id, {
+      buffer,
+      mimetype: "image/jpeg",
+    });
+    let committed = false;
+    try {
+      const checkIn = await prisma.$transaction(async (tx) => {
+        const existing = await tx.checkIn.findUnique({
+          where: { taskId_userId: { taskId: task.id, userId: req.auth.id } },
+        });
+        const data = {
+          photoUrl,
+          lat: input.lat,
+          lng: input.lng,
+          address: input.address ?? null,
+          accuracy: input.accuracy,
+          capturedAt,
+          submittedAt: now,
+          attemptId,
+          photoHash,
+          status: "EMAIL_PENDING" as const,
+          rejectReason: null,
+          emailSubject: subject,
+          emailReceivedAt: null,
+        };
+        let id: string;
+        if (existing) {
+          const updated = await tx.checkIn.updateMany({
+            where: {
+              id: existing.id,
+              status: { in: ["NOT_CHECKED", "REJECTED", "EMAIL_ERROR"] },
+              attemptId: existing.attemptId,
+            },
+            data,
+          });
+          if (!updated.count) throw fail(409, "打卡已提交，请查看当前状态");
+          id = existing.id;
+        } else {
+          id = (
+            await tx.checkIn.create({
+              data: { ...data, taskId: task.id, userId: req.auth.id },
+            })
+          ).id;
+        }
+        await tx.mailOutbox.create({
+          data: {
+            id: attemptId,
+            checkInId: id,
+            subject,
+            body,
+            photoUrl,
+            targetEmail: task.targetEmail,
+          },
+        });
+        return tx.checkIn.findUniqueOrThrow({ where: { id } });
+      });
+      committed = true;
+      res
+        .status(202)
+        .json({
+          checkIn: view(checkIn),
+          distanceMeters: Math.round(fence.distanceMeters),
+          message: "打卡已保存，正在排队发送邮件",
+        });
+    } finally {
+      if (!committed)
+        await photoStorage.removeByPublicUrl(photoUrl).catch(() => undefined);
     }
-    next(error);
-  }
-});
-
-checkInRouter.use(
-  (error: Error, _request: Request, response: import("express").Response, next: import("express").NextFunction) => {
-    if (error instanceof multer.MulterError) {
-      response.status(400).json({ message: "照片大小不能超过 10MB" });
-      return;
-    }
-    next(error);
-  }
+  }),
 );

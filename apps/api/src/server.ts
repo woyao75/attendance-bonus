@@ -1,42 +1,23 @@
-import cors from "cors";
-import dotenv from "dotenv";
-import express from "express";
-import path from "node:path";
-import { checkInRouter } from "./routes/check-ins.js";
-import { taskRouter } from "./routes/tasks.js";
-import { startMailAgent } from "./services/mail-agent.js";
-
-dotenv.config();
-
-const app = express();
-const port = Number(process.env.PORT ?? 3000);
-
-app.use(cors());
-app.use(express.json({ limit: "1mb" }));
-app.use("/uploads", express.static(path.resolve(process.env.UPLOAD_DIR ?? "./uploads")));
-
-app.get("/health", (_request, response) => {
-  response.json({ status: "ok" });
-});
-
-app.use("/api/tasks", taskRouter);
-app.use("/api/check-ins", checkInRouter);
-
-app.use(
-  (
-    error: Error & { statusCode?: number },
-    _request: express.Request,
-    response: express.Response,
-    _next: express.NextFunction
-  ) => {
-    console.error(error);
-    response.status(error.statusCode ?? 500).json({
-      message: error.statusCode ? error.message : "服务器内部错误"
-    });
-  }
+import "dotenv/config";
+import { createApp } from "./app.js";
+import { prisma } from "./lib/prisma.js";
+if (
+  process.env.NODE_ENV === "production" &&
+  (!process.env.APP_ORIGINS?.startsWith("https://") ||
+    !process.env.MAIL_SIGNING_SECRET ||
+    process.env.MAIL_SIGNING_SECRET.length < 32)
+)
+  throw new Error("生产环境必须配置 HTTPS APP_ORIGINS 和 MAIL_SIGNING_SECRET");
+const host =
+  process.env.HOST ??
+  (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+const server = createApp().listen(Number(process.env.PORT ?? 3000), host, () =>
+  console.log(`API ready on ${host}`),
 );
-
-app.listen(port, () => {
-  console.log(`API listening on http://localhost:${port}`);
-  startMailAgent();
-});
+for (const signal of ["SIGTERM", "SIGINT"])
+  process.on(signal, () => {
+    server.close(() => {
+      void prisma.$disconnect().then(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  });

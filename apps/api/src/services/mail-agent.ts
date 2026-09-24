@@ -1,222 +1,196 @@
-import cron, { type ScheduledTask } from "node-cron";
+import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow } from "imapflow";
-import { simpleParser, type ParsedMail } from "mailparser";
+import { simpleParser } from "mailparser";
+import sharp from "sharp";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { photoStorage } from "../lib/storage.js";
+import { parseSignedMail } from "./check-in-mailer.js";
 
-const metadataSchema = z.object({
-  taskId: z.string().cuid(),
-  userId: z.string().cuid(),
-  lat: z.number().gte(-90).lte(90),
-  lng: z.number().gte(-180).lte(180),
-  address: z.string().max(300).nullable().optional(),
-  time: z.string().optional()
-});
-
-const subjectPattern = /^\[打卡\]([^_]+)_(.+)_([a-z0-9]+)$/u;
-const imageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-export interface MailAgentStatus {
+export const mailAgentStatus: {
   running: boolean;
-  lastRunAt?: Date;
+  enabled: boolean;
   lastSuccessAt?: Date;
   lastError?: string;
   processedCount: number;
-}
+  queueLength?: number;
+} = { running: false, enabled: false, processedCount: 0 };
 
-export const mailAgentStatus: MailAgentStatus = {
-  running: false,
-  processedCount: 0
+export const parseCheckInMetadata = (text: string | undefined) => {
+  if (!text) throw new Error("Mail body is empty");
+  return parseSignedMail(text);
 };
 
-function getImapConfig() {
-  const { IMAP_HOST, IMAP_PORT, IMAP_USER, IMAP_PASS } = process.env;
-  if (!IMAP_HOST || !IMAP_PORT || !IMAP_USER || !IMAP_PASS) return null;
-  return {
-    host: IMAP_HOST,
-    port: Number(IMAP_PORT),
-    secure: process.env.IMAP_SECURE?.toLowerCase() === "true",
-    auth: { user: IMAP_USER, pass: IMAP_PASS },
-    logger: false as const
-  };
+const localMailMetadata = z.object({
+  taskId: z.string().cuid(),
+  studentId: z.string().trim().min(1).max(64),
+  time: z.string().datetime({ offset: true }).optional(),
+  lat: z.number().finite().min(-90).max(90).optional(),
+  lng: z.number().finite().min(-180).max(180).optional(),
+});
+
+export function parseLocalSubject(subject: string | undefined) {
+  const match =
+    /^\[返校打卡\]\s*([^_\s]+)_([^_]+)_([a-z0-9]{20,32})_([a-f0-9]{32})\s*$/i.exec(
+      subject ?? "",
+    );
+  if (!match)
+    throw new Error("Subject must be: [返校打卡] studentId_name_taskId_mailToken");
+  return { studentId: match[1], name: match[2], taskId: match[3], token: match[4] };
 }
 
-function parseSubject(subject: string) {
-  const match = subjectPattern.exec(subject);
-  if (!match) throw new Error("邮件主题不符合打卡格式");
-  return { studentId: match[1], studentName: match[2], taskId: match[3] };
+export function parseLocalBody(text: string | undefined, subject: string | undefined) {
+  const subjectData = parseLocalSubject(subject);
+  const value = (text ?? "").trim();
+  let body: Record<string, unknown> = {};
+  if (value) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") body = parsed;
+    } catch {
+      for (const line of value.split(/\r?\n/)) {
+        const match = /^\s*(taskId|studentId|time|lat|lng)\s*[:：]\s*(.+?)\s*$/.exec(line);
+        if (match) body[match[1]] = ["lat", "lng"].includes(match[1]) ? Number(match[2]) : match[2];
+      }
+    }
+  }
+  const metadata = localMailMetadata.parse({ ...subjectData, ...body });
+  if (metadata.taskId !== subjectData.taskId || metadata.studentId !== subjectData.studentId)
+    throw new Error("Body identity does not match the subject");
+  return { ...metadata, name: subjectData.name, token: subjectData.token };
 }
 
-export function parseCheckInMetadata(text: string | undefined) {
-  if (!text) throw new Error("邮件正文为空");
+function senderAddress(parsed: Awaited<ReturnType<typeof simpleParser>>) {
+  return parsed.from?.value[0]?.address?.trim().toLowerCase() ?? null;
+}
+function messageSubject(parsed: Awaited<ReturnType<typeof simpleParser>>) {
+  return (parsed.subject ?? "(no subject)").slice(0, 320);
+}
+async function rejectLocalMail(input: { messageId: string; taskId?: string; sender: string | null; subject: string; error: string }) {
+  await prisma.inboundMailLog.create({
+    data: { messageId: input.messageId, taskId: input.taskId, sender: input.sender, subject: input.subject, status: "REJECTED", errorMsg: input.error.slice(0, 500) },
+  });
+}
+
+async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>) {
+  const messageId = parsed.messageId?.trim();
+  if (!messageId) return false;
+  if (await prisma.inboundMailLog.findUnique({ where: { messageId } })) return true;
+  const sender = senderAddress(parsed);
+  const subject = messageSubject(parsed);
+  let metadata: ReturnType<typeof parseLocalBody> | undefined;
+  let subjectTaskId: string | undefined;
   try {
-    return metadataSchema.parse(JSON.parse(text.trim()));
-  } catch {
-    throw new Error("邮件正文不是有效的打卡 JSON");
+    subjectTaskId = parseLocalSubject(parsed.subject).taskId;
+    metadata = parseLocalBody(parsed.text, parsed.subject);
+    const localMetadata = metadata;
+    const member = await prisma.taskMember.findFirst({
+      where: { taskId: metadata.taskId, studentId: metadata.studentId },
+      include: { task: true, user: true },
+    });
+    const now = new Date();
+    if (!member) throw new Error("No matching task member");
+    if (!sender || member.email?.toLowerCase() !== sender) throw new Error("Sender does not match the registered email");
+    if (!member.mailToken || member.mailToken !== metadata.token) throw new Error("Invalid per-student mail token");
+    if (member.name !== metadata.name) throw new Error("Name does not match roster");
+    if (!member.user.active) throw new Error("Student account is disabled");
+    if (member.task.status === "ARCHIVED" || member.task.status === "COMPLETED" || now < member.task.startTime || now > member.task.endTime)
+      throw new Error("Task is outside its active time window");
+    const existing = await prisma.checkIn.findUnique({ where: { taskId_userId: { taskId: member.taskId, userId: member.userId } } });
+    if (existing && !["NOT_CHECKED", "REJECTED", "EMAIL_ERROR"].includes(existing.status))
+      throw new Error("A check-in is already being reviewed or completed");
+    const attachment = parsed.attachments.find((item) => ["image/jpeg", "image/png", "image/webp"].includes(item.contentType));
+    if (!attachment) throw new Error("No supported image attachment");
+    if (attachment.content.length > 8 * 1024 * 1024) throw new Error("Image attachment exceeds 8MB");
+    const photo = await sharp(attachment.content, { limitInputPixels: 20_000_000, failOn: "error" }).rotate().jpeg({ quality: 92 }).toBuffer();
+    const photoHash = createHash("sha256").update(photo).digest("hex");
+    const photoUrl = await photoStorage.saveCheckInPhoto(member.taskId, member.userId, { buffer: photo, mimetype: "image/jpeg" });
+    let committed = false;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.inboundMailLog.create({ data: { messageId, taskId: member.taskId, sender, subject, status: "ACCEPTED" } });
+        await tx.emailLog.create({ data: { taskId: member.taskId, messageId, subject, parseStatus: "success" } });
+        const data = { status: "REVIEWING" as const, photoUrl, photoHash, lat: localMetadata.lat ?? null, lng: localMetadata.lng ?? null, capturedAt: localMetadata.time ? new Date(localMetadata.time) : now, submittedAt: now, emailSubject: subject, emailReceivedAt: now, rejectReason: null, attemptId: randomUUID() };
+        if (existing) await tx.checkIn.update({ where: { id: existing.id }, data });
+        else await tx.checkIn.create({ data: { ...data, taskId: member.taskId, userId: member.userId } });
+      });
+      committed = true;
+      return true;
+    } finally {
+      if (!committed) await photoStorage.removeByPublicUrl(photoUrl).catch(() => undefined);
+    }
+  } catch (error) {
+    await rejectLocalMail({ messageId, taskId: metadata?.taskId ?? subjectTaskId, sender, subject, error: error instanceof Error ? error.message : "Unable to process local mail" }).catch(async (logError) => {
+      if (!String(logError).includes("Unique constraint")) throw logError;
+    });
+    return true;
   }
 }
 
-async function parseMessageSource(source: Buffer | undefined): Promise<ParsedMail> {
-  if (!source) throw new Error("邮件原文为空");
-  return simpleParser(source, {});
+// Signed messages are generated by this application in hosted mode only.
+export async function ingestMail(source: Buffer) {
+  const parsed = await simpleParser(source, { skipHtmlToText: true, skipTextToHtml: true });
+  if (process.env.LOCAL_EMAIL_MODE === "true") return ingestLocalMail(parsed);
+  let metadata;
+  try { metadata = parseCheckInMetadata(parsed.text); } catch { return false; }
+  const job = await prisma.mailOutbox.findUnique({ where: { id: metadata.attemptId }, include: { checkIn: { include: { task: true } } } });
+  if (!job || job.checkIn.taskId !== metadata.taskId || job.checkIn.userId !== metadata.userId || job.body !== JSON.stringify({ payload: JSON.stringify(metadata), signature: JSON.parse(job.body).signature })) return false;
+  const messageId = parsed.messageId;
+  if (!messageId || messageId !== `<${job.id}@attendance.local>`) return false;
+  if (await prisma.emailLog.findUnique({ where: { messageId } })) return true;
+  const attachment = parsed.attachments.find((item) => item.contentType === "image/jpeg");
+  const valid = parsed.subject === job.subject && Boolean(attachment) && createHash("sha256").update(attachment?.content ?? Buffer.alloc(0)).digest("hex") === metadata.photoHash;
+  await prisma.$transaction(async (tx) => {
+    await tx.emailLog.create({ data: { taskId: metadata.taskId, messageId, subject: messageSubject(parsed), parseStatus: valid ? "success" : "failed", errorMsg: valid ? null : "Subject or attachment validation failed" } });
+    if (valid) {
+      await tx.checkIn.updateMany({ where: { id: job.checkInId, attemptId: metadata.attemptId, status: { in: ["EMAIL_PENDING", "EMAIL_SENT", "EMAIL_ERROR"] }, task: { status: { not: "ARCHIVED" } } }, data: { status: "REVIEWING", emailReceivedAt: new Date() } });
+      await tx.mailOutbox.update({ where: { id: job.id }, data: { sentAt: new Date(), error: null } });
+    } else {
+      await tx.checkIn.updateMany({ where: { id: job.checkInId, attemptId: metadata.attemptId, status: { in: ["EMAIL_PENDING", "EMAIL_SENT"] } }, data: { status: "EMAIL_ERROR" } });
+    }
+  });
+  return true;
 }
 
-async function archiveMessage(client: ImapFlow, uid: number): Promise<void> {
-  const processedMailbox = process.env.IMAP_PROCESSED_MAILBOX;
-  try {
-    if (processedMailbox) {
-      await client.messageMove(uid, processedMailbox, { uid: true });
-      return;
-    }
-  } catch (error) {
-    console.warn("移动已处理邮件失败，改为标记已读", error);
+let scanOffset = 0;
+async function markHandled(client: ImapFlow, uid: number) {
+  const processedMailbox = process.env.IMAP_PROCESSED_MAILBOX?.trim();
+  if (processedMailbox) {
+    try { await client.messageMove(uid, processedMailbox, { uid: true }); return; }
+    catch { /* Folder may not exist; marking it seen is the safe fallback. */ }
   }
   await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
 }
-
-async function recordFailure(taskId: string | undefined, messageId: string, subject: string, error: unknown) {
-  if (!taskId) return;
-  const task = await prisma.task.findUnique({ where: { id: taskId }, select: { id: true } });
-  if (!task) return;
-  await prisma.emailLog.upsert({
-    where: { messageId },
-    create: {
-      taskId,
-      messageId,
-      subject,
-      parseStatus: "failed",
-      errorMsg: error instanceof Error ? error.message.slice(0, 1000) : "未知解析错误"
-    },
-    update: {}
-  });
-}
-
-async function processMessage(client: ImapFlow, message: { uid: number; source?: Buffer; envelope?: { subject?: string } }) {
-  const parsed = await parseMessageSource(message.source);
-  const subject = parsed.subject ?? message.envelope?.subject ?? "";
-  const messageId = parsed.messageId ?? `imap-${process.env.IMAP_USER}-${message.uid}`;
-  const parsedSubject = parseSubject(subject);
-
-  const duplicate = await prisma.emailLog.findUnique({ where: { messageId }, select: { id: true } });
-  if (duplicate) return;
-
-  const metadata = parseCheckInMetadata(parsed.text);
-  if (metadata.taskId !== parsedSubject.taskId) {
-    throw new Error("主题与正文的任务 ID 不一致");
-  }
-
-  const [task, user] = await Promise.all([
-    prisma.task.findUnique({ where: { id: metadata.taskId } }),
-    prisma.user.findUnique({ where: { id: metadata.userId } })
-  ]);
-  if (!task || !user || user.role !== "student" || user.studentId !== parsedSubject.studentId) {
-    throw new Error("邮件中的任务或学生信息无效");
-  }
-
-  const attachment = parsed.attachments.find((item) => imageMimeTypes.has(item.contentType));
-  let incomingPhotoUrl: string | undefined;
-  if (attachment) {
-    incomingPhotoUrl = await photoStorage.saveCheckInPhoto(task.id, user.id, {
-      buffer: attachment.content,
-      mimetype: attachment.contentType
-    });
-  }
-
-  const existing = await prisma.checkIn.findUnique({
-    where: { taskId_userId: { taskId: task.id, userId: user.id } }
-  });
-  try {
-    await prisma.$transaction(async (transaction) => {
-      await transaction.emailLog.create({
-        data: { taskId: task.id, messageId, subject, parseStatus: "success" }
-      });
-      await transaction.checkIn.upsert({
-        where: { taskId_userId: { taskId: task.id, userId: user.id } },
-        create: {
-          taskId: task.id,
-          userId: user.id,
-          status: "REVIEWING",
-          photoUrl: incomingPhotoUrl,
-          lat: metadata.lat,
-          lng: metadata.lng,
-          address: metadata.address ?? null,
-          emailSubject: subject,
-          emailReceivedAt: new Date()
-        },
-        update: {
-          status: "REVIEWING",
-          ...(incomingPhotoUrl ? { photoUrl: incomingPhotoUrl } : {}),
-          lat: metadata.lat,
-          lng: metadata.lng,
-          address: metadata.address ?? null,
-          emailSubject: subject,
-          emailReceivedAt: new Date()
-        }
-      });
-    });
-  } catch (error) {
-    if (incomingPhotoUrl) await photoStorage.removeByPublicUrl(incomingPhotoUrl);
-    throw error;
-  }
-
-  if (incomingPhotoUrl && existing?.photoUrl && existing.photoUrl !== incomingPhotoUrl) {
-    await photoStorage.removeByPublicUrl(existing.photoUrl);
-  }
-}
-
-export async function runMailAgent(): Promise<void> {
+export async function runMailAgent() {
   if (mailAgentStatus.running) return;
-  const config = getImapConfig();
-  if (!config) {
-    mailAgentStatus.lastError = "IMAP 配置不完整";
-    return;
-  }
-
+  if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASS) { mailAgentStatus.lastError = "IMAP is not configured"; return; }
   mailAgentStatus.running = true;
-  mailAgentStatus.lastRunAt = new Date();
-  const client = new ImapFlow(config);
+  mailAgentStatus.enabled = true;
+  const client = new ImapFlow({ host: process.env.IMAP_HOST, port: Number(process.env.IMAP_PORT ?? 993), secure: process.env.IMAP_SECURE !== "false", auth: { user: process.env.IMAP_USER, pass: process.env.IMAP_PASS }, logger: false, socketTimeout: 60000 });
+  client.on("error", () => { mailAgentStatus.lastError = "IMAP connection error"; });
   try {
     await client.connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
-      for await (const message of client.fetch({ seen: false }, { uid: true, source: true, envelope: true })) {
-        let taskId: string | undefined;
-        let messageId = `imap-${process.env.IMAP_USER}-${message.uid}`;
-        let subject = message.envelope?.subject ?? "";
+      const subject = process.env.LOCAL_EMAIL_MODE === "true" ? "[返校打卡]" : "[打卡]";
+      const uids = (await client.search({ seen: false, subject }, { uid: true })) || [];
+      mailAgentStatus.queueLength = uids.length;
+      if (scanOffset >= uids.length) scanOffset = 0;
+      const batch = uids.slice(scanOffset, scanOffset + 50);
+      scanOffset += batch.length;
+      for (const uid of batch) {
         try {
-          const parsed = await parseMessageSource(message.source);
-          subject = parsed.subject ?? subject;
-          messageId = parsed.messageId ?? messageId;
-          taskId = parseSubject(subject).taskId;
-          await processMessage(client, message);
-          mailAgentStatus.processedCount += 1;
-        } catch (error) {
-          console.error("解析打卡邮件失败", error);
-          await recordFailure(taskId, messageId, subject, error);
-        } finally {
-          await archiveMessage(client, message.uid);
-        }
+          const info = await client.fetchOne(uid, { size: true }, { uid: true });
+          if (!info || !info.size) continue;
+          if (info.size > 15 * 1024 * 1024) { await markHandled(client, uid); continue; }
+          const message = await client.fetchOne(uid, { source: true }, { uid: true });
+          if (!message || !message.source) continue;
+          if (await ingestMail(message.source)) { await markHandled(client, uid); mailAgentStatus.processedCount++; }
+        } catch { /* Continue with other messages; this one remains unread for retry. */ }
       }
-    } finally {
-      lock.release();
-    }
+    } finally { lock.release(); }
     mailAgentStatus.lastSuccessAt = new Date();
     mailAgentStatus.lastError = undefined;
-  } catch (error) {
-    mailAgentStatus.lastError = error instanceof Error ? error.message : "IMAP Agent 运行失败";
-    console.error("IMAP Agent 运行失败", error);
-  } finally {
-    mailAgentStatus.running = false;
-    await client.logout().catch(() => undefined);
-  }
-}
-
-export function startMailAgent(): ScheduledTask | undefined {
-  if (!getImapConfig()) {
-    console.warn("IMAP 未配置，邮件 Agent 未启动");
-    return undefined;
-  }
-  void runMailAgent();
-  return cron.schedule("* * * * *", () => void runMailAgent());
+  } catch { mailAgentStatus.lastError = "Mail scan failed; unread messages will be retried"; }
+  finally { mailAgentStatus.running = false; await client.logout().catch(() => client.close()); }
 }

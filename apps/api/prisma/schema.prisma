@@ -16,6 +16,7 @@ enum TaskStatus {
 
 enum CheckInStatus {
   NOT_CHECKED
+  EMAIL_PENDING
   EMAIL_SENT
   REVIEWING
   APPROVED
@@ -23,12 +24,54 @@ enum CheckInStatus {
   EMAIL_ERROR
 }
 
+enum UserRole {
+  STUDENT
+  COUNSELOR
+  ADMIN
+}
+
+model Class {
+  id String @id @default(cuid()) @db.VarChar(100)
+  name String @unique @db.VarChar(100)
+  active Boolean @default(true)
+  students User[]
+  counselors CounselorClass[]
+}
+
+model CounselorClass {
+  userId String @db.VarChar(30)
+  classId String @db.VarChar(100)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  class Class @relation(fields: [classId], references: [id], onDelete: Restrict)
+  @@id([userId, classId])
+}
+
+model Session {
+  tokenHash String @id @db.Char(64)
+  userId String @db.VarChar(30)
+  expiresAt DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 model User {
   id        String    @id @default(cuid()) @db.VarChar(30)
   studentId String    @unique @db.VarChar(64)
+  email     String?   @unique @db.VarChar(320)
   name      String    @db.VarChar(100)
-  role      String    @db.VarChar(32)
-  classId   String    @db.VarChar(100)
+  role      UserRole @default(STUDENT)
+  passwordHash String? @db.VarChar(255)
+  active Boolean @default(true)
+  mustChangePassword Boolean @default(true)
+  loginFailures Int @default(0)
+  lockedUntil DateTime?
+  classId   String?    @db.VarChar(100)
+  class Class? @relation(fields: [classId], references: [id], onDelete: Restrict)
+  managedClasses CounselorClass[]
+  sessions Session[]
+  memberships TaskMember[]
+  ownedTasks Task[]
   checkIns  CheckIn[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -45,10 +88,26 @@ model Task {
   centerLng     Float
   radius        Int          @default(800)
   status        TaskStatus   @default(NOT_STARTED)
+  ownerId String? @db.VarChar(30)
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  members TaskMember[]
   checkIns      CheckIn[]
   emailLogs     EmailLog[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+}
+
+model TaskMember {
+  taskId String @db.VarChar(30)
+  userId String @db.VarChar(30)
+  studentId String @db.VarChar(64)
+  email String? @db.VarChar(320)
+  mailToken String? @unique @db.Char(32)
+  name String @db.VarChar(100)
+  className String @db.VarChar(100)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@id([taskId, userId])
 }
 
 model CheckIn {
@@ -65,13 +124,57 @@ model CheckIn {
   rejectReason    String?       @db.VarChar(300)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  submittedAt DateTime?
+  attemptId String? @unique @db.Char(36)
+  photoHash String? @db.Char(64)
+  capturedAt DateTime?
+  accuracy Float?
+  outbox MailOutbox[]
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([taskId, userId])
   @@index([taskId, status])
   @@index([userId, createdAt])
+}
+
+model MailOutbox {
+  id String @id @db.Char(36)
+  checkInId String @db.VarChar(30)
+  checkIn CheckIn @relation(fields: [checkInId], references: [id], onDelete: Restrict)
+  subject String @db.VarChar(320)
+  body String @db.Text
+  photoUrl String @db.VarChar(2048)
+  targetEmail String @db.VarChar(320)
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  sentAt DateTime?
+  error String? @db.VarChar(500)
+  @@index([sentAt, nextAttemptAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid()) @db.VarChar(30)
+  actorId String @db.VarChar(30)
+  action String @db.VarChar(64)
+  targetId String @db.VarChar(100)
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+
+model InboundMailLog {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  messageId   String   @unique @db.VarChar(320)
+  taskId      String?  @db.VarChar(30)
+  sender      String?  @db.VarChar(320)
+  subject     String   @db.VarChar(320)
+  status      String   @db.VarChar(32)
+  errorMsg    String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([status, createdAt])
 }
 
 model EmailLog {

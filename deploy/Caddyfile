@@ -1,0 +1,31 @@
+{$DOMAIN} {
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy same-origin
+    Permissions-Policy "camera=(self), geolocation=(self), microphone=()"
+    X-Frame-Options DENY
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  }
+  request_body {
+    max_size 10MB
+  }
+  @api path /api/* /health /ready
+  handle @api {
+    reverse_proxy api:3000
+  }
+  handle /uploads/* {
+    respond "Not found" 404
+  }
+  handle /sw.js {
+    header Cache-Control "no-cache, no-store, must-revalidate"
+    root * /srv
+    file_server
+  }
+  handle {
+    root * /srv
+    try_files {path} /index.html
+    header Cache-Control "no-cache"
+    file_server
+  }
+}
