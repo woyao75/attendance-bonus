@@ -29,5 +29,8 @@
     "@types/express": "^4.17.21",
     "@types/express-serve-static-core": "^4.19.6",
     "concurrently": "^9.1.2"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.63.4"
   }
 }

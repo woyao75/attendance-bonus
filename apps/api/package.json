@@ -29,7 +29,7 @@
     "imapflow": "^1.0.181",
     "jszip": "^3.10.1",
     "mailparser": "^3.7.2",
-    "multer": "^2.3.0",
+    "multer": "^2.4.0",
     "node-cron": "^4.0.7",
     "nodemailer": "^10.0.10",
     "sharp": "^0.35.4",
