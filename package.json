@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w @attendance/api\" \"npm run dev -w @attendance/web\" \"npm run worker -w @attendance/api\"",
     "local": "npm run dev",
+    "local:start": "node scripts/start-local.mjs",
     "build": "npm run build -w @attendance/api && npm run build -w @attendance/web",
     "lint": "npm run lint -w @attendance/api && npm run lint -w @attendance/web",
     "test": "npm run test -w @attendance/api",

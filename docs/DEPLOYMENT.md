@@ -163,17 +163,13 @@ npm run test:pwa
 
 ## 本地直收模式上线前验收
 
-完成迁移和 `npm.cmd run build` 后，可在管理员电脑开两个 PowerShell 窗口运行构建版本（两个窗口均先进入项目根目录）：
+完成迁移和 `npm.cmd run build` 后，在管理员电脑的项目根目录运行：
 
 ```powershell
-$env:NODE_ENV='production'; npm.cmd run start -w @attendance/api
+npm.cmd run local:start
 ```
 
-```powershell
-$env:NODE_ENV='production'; npm.cmd run worker:start -w @attendance/api
-```
-
-本地后台地址为 `http://127.0.0.1:3000`，不再需要 Vite 开发服务器。关闭窗口或关机后进程会停止；下次开机须重启两个进程，MySQL 也必须保持运行。此模式默认只监听回环地址，不要通过端口转发把它公开到校园网或互联网。
+该命令检查本地模式配置和构建产物，API 连通数据库后启动邮件 Agent。本地后台地址为 `http://127.0.0.1:3000`，不再需要 Vite 开发服务器。关闭窗口或关机后进程会停止；下次开机须确认 MySQL 运行并重新执行此命令。此模式默认只监听回环地址，不要通过端口转发把它公开到校园网或互联网。
 
 1. 用专用 IMAP 收件箱试运行，确认邮箱服务器允许按主题搜索未读邮件。不要让邮箱规则或人工操作提前把打卡邮件标记为已读或移出 INBOX；Agent 只扫描匹配主题的未读邮件。同步本机与邮箱服务器时钟。
 2. 使用独立 `attendance_test` 数据库跑上述集成测试；不要把 `TEST_DATABASE_URL` 指向业务库。真实任务另用测试学生和测试邮箱各发送一封有效、无效和重复邮件，核对审核状态、拒收日志、照片和 Agent 心跳；重启电脑后再核对数据仍在。

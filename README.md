@@ -8,19 +8,20 @@ React + TypeScript + PWA，Express + Prisma + MySQL 8.0。支持单机本地模�
 
 ## 本地启动
 
-需要 Node.js 22.12+ 和 MySQL 8.0。填写 `apps/api/.env`（参考 `.env.example`），保留现有凭据。
+需要 Node.js 22.12+ 和 MySQL 8.0。首次填写 `apps/api/.env`（参考 `.env.example`），保留现有凭据。
 
 ```powershell
-npm ci
+npm.cmd ci --allow-remote=all
 # 若官方 Prisma 引擎下载超时，在 apps/api/.env 添加：
 # PRISMA_ENGINES_MIRROR="https://registry.npmmirror.com/-/binary/prisma"
-npm run prisma:generate -w @attendance/api
-npm run db:deploy -w @attendance/api
-npm run admin:create -w @attendance/api
-npm run local
+npm.cmd run prisma:generate -w @attendance/api
+npm.cmd run db:deploy -w @attendance/api
+npm.cmd run admin:create -w @attendance/api  # 仅首次且尚无管理员时
+npm.cmd run build
+npm.cmd run local:start
 ```
 
-`admin:create` 需临时设置 ADMIN_ACCOUNT、ADMIN_PASSWORD；创建后移除密码配置。首次登录必须改密。打开 http://localhost:5173 ，学生、辅导员和管理员均从登录页进入。
+`admin:create` 需临时设置 ADMIN_ACCOUNT、ADMIN_PASSWORD；创建后移除密码配置。首次登录必须改密。日常启动只需先确认 MySQL 服务运行，再执行 `npm.cmd run local:start`，打开 http://127.0.0.1:3000 。命令窗口保持打开；关闭它会停止 API 和邮件 Agent。前端代码更新后重新执行 `npm.cmd run build`。`npm run local` 仍保留为开发模式，使用 5173 端口。
 
 已有数据库先备份再升级。可运行 `npm run doctor -w @attendance/api` 检查缺少的配置和数据表，检查过程不显示凭据、不发送邮件。
 
@@ -44,4 +45,4 @@ npm test
 
 ## 单机直收邮箱模式
 
-将 `apps/api/.env` 的 `LOCAL_EMAIL_MODE` 设为 `true`，只配置 IMAP。学生直接向 `IMAP_USER` 发邮件，主题使用 `[返校打卡] 学号_姓名_任务ID_专属验证码`，附件放照片；本机 Agent 每分钟抓取并在 A 端显示为“审核中”。发布任务后，管理页会列出每名学生的专属主题，必须逐人私发，不可群发。运行 `npm run local` 启动本地 API、A 端和 Agent。
+将 `apps/api/.env` 的 `LOCAL_EMAIL_MODE` 设为 `true`，只配置 IMAP。学生直接向 `IMAP_USER` 发邮件，主题使用 `[返校打卡] 学号_姓名_任务ID_专属验证码`，附件放照片；本机 Agent 每分钟抓取并在 A 端显示为“审核中”。发布任务后，管理页会列出每名学生的专属主题，必须逐人私发，不可群发。运行 `npm.cmd run local:start` 启动构建后的本地 API、页面和 Agent。
