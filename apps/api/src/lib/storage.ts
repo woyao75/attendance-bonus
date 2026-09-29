@@ -31,8 +31,13 @@ export class LocalPhotoStorage {
     const filename = `${Date.now()}-${randomUUID()}${extension}`;
     const destination = path.join(directory, filename);
     const temporaryFile = `${destination}.tmp`;
-    await writeFile(temporaryFile, file.buffer);
-    await rename(temporaryFile, destination);
+    try {
+      await writeFile(temporaryFile, file.buffer);
+      await rename(temporaryFile, destination);
+    } catch (error) {
+      await rm(temporaryFile, { force: true }).catch(() => undefined);
+      throw error;
+    }
 
     return `/uploads/check-ins/${taskId}/${userId}/${filename}`;
   }

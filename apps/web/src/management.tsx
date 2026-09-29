@@ -13,14 +13,18 @@ type UserRow = Account & {
   class?: { name: string };
 };
 type LocalTaskMember = {
+  userId: string;
   studentId: string;
   name: string;
   email: string | null;
   mailToken: string | null;
 };
 type CreatedTask = { id: string; title: string; members: LocalTaskMember[] };
+type TaskSummary = { id: string; title: string; status: string };
 export function Management({ user }: { user: Account }) {
   const [classes, setClasses] = useState<ClassRow[]>([]);
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [credentialTaskId, setCredentialTaskId] = useState("");
   const [users, setUsers] = useState<UserRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -29,15 +33,17 @@ export function Management({ user }: { user: Account }) {
   const [busy, setBusy] = useState(false);
   const [publishedTask, setPublishedTask] = useState<CreatedTask>();
   async function refresh() {
-    const [a, b] = await Promise.all([
+    const [a, b, c] = await Promise.all([
       api<{ classes: ClassRow[] }>("/api/manage/classes"),
       api<{ users: UserRow[]; total: number }>(
         `/api/manage/users?page=${page}&search=${encodeURIComponent(search)}`,
       ),
+      api<{ tasks: TaskSummary[] }>("/api/tasks"),
     ]);
     setClasses(a.classes);
     setUsers(b.users);
     setTotal(b.total);
+    setTasks(c.tasks);
   }
   useEffect(() => {
     void refresh().catch((e) => setMessage(e.message));
@@ -376,6 +382,21 @@ export function Management({ user }: { user: Account }) {
             </div>
             <button className="command-button">发布任务</button>
           </form>
+          <div className="mt-5">
+            <p className="text-sm">任务成员邮箱与账号邮箱分别管理。更正后需单独发送新主题，旧验证码立即失效。</p>
+            <label>
+              查看已发布任务的邮件凭据
+              <select value={credentialTaskId} onChange={(event) => setCredentialTaskId(event.target.value)}>
+                <option value="">选择任务</option>
+                {tasks.map((task) => <option key={task.id} value={task.id}>{task.title} · {task.status}</option>)}
+              </select>
+            </label>
+            <button className="secondary-button" type="button" disabled={!credentialTaskId} onClick={() => void action(async () => {
+              const task = await api<CreatedTask>(`/api/tasks/${credentialTaskId}/credentials`);
+              setPublishedTask(task);
+              return task;
+            })}>查看凭据</button>
+          </div>
           {publishedTask && publishedTask.members.some((member) => member.mailToken) && (
             <div className="mt-5 border border-amber-300 bg-amber-50 p-4 text-sm">
               <p className="font-semibold">本地直收邮件凭据：{publishedTask.title}</p>
@@ -390,6 +411,28 @@ export function Management({ user }: { user: Account }) {
                     <p className="mt-1 break-all font-mono text-xs">
                       [返校打卡] {member.studentId}_{member.name}_{publishedTask.id}_{member.mailToken ?? "无验证码"}
                     </p>
+                    {tasks.find((task) => task.id === publishedTask.id)?.status !== "ARCHIVED" && (
+                      <div className="mt-3 flex flex-wrap items-end gap-2">
+                        <form onSubmit={(event) => {
+                          event.preventDefault();
+                          const email = String(new FormData(event.currentTarget).get("email"));
+                          void action(async () => {
+                            await api(`/api/tasks/${publishedTask.id}/members/${member.userId}/mail-credential`, { email }, "PATCH");
+                            setPublishedTask(await api<CreatedTask>(`/api/tasks/${publishedTask.id}/credentials`));
+                          });
+                        }}>
+                          <label>本任务可信邮箱<input name="email" type="email" defaultValue={member.email ?? ""} required /></label>
+                          <button className="secondary-button">更新邮箱并轮换验证码</button>
+                        </form>
+                        <button className="secondary-button" type="button" onClick={() => {
+                          if (!confirm(`轮换 ${member.name} 的专属验证码？旧主题将立即失效。`)) return;
+                          void action(async () => {
+                            await api(`/api/tasks/${publishedTask.id}/members/${member.userId}/mail-credential`, { rotateToken: true }, "PATCH");
+                            setPublishedTask(await api<CreatedTask>(`/api/tasks/${publishedTask.id}/credentials`));
+                          });
+                        }}>轮换验证码</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

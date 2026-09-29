@@ -163,6 +163,15 @@ describe.skipIf(!url)("MySQL API and signed email workflow", () => {
       400,
     );
   });
+  it("disables browser photo submission in local direct-mail mode", async () => {
+    process.env.LOCAL_EMAIL_MODE = "true";
+    try {
+      await submit(student).expect(409);
+      expect(await prisma.mailOutbox.count({ where: { checkIn: { taskId } } })).toBe(0);
+    } finally {
+      process.env.LOCAL_EMAIL_MODE = "false";
+    }
+  });
   it("enqueues a submission atomically and protects its photo", async () => {
     const response = await submit(student)
       .field("userId", "forged-user")

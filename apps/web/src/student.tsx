@@ -18,11 +18,12 @@ const labels = {
 };
 export function StudentHome({ user }: { user: Account }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [localEmailMode, setLocalEmailMode] = useState(false);
   const [selected, setSelected] = useState<Task>();
   const [error, setError] = useState("");
   useEffect(() => {
-    api<{ tasks: Task[] }>("/api/tasks")
-      .then((v) => setTasks(v.tasks))
+    api<{ tasks: Task[]; localEmailMode: boolean }>("/api/tasks")
+      .then((v) => { setTasks(v.tasks); setLocalEmailMode(v.localEmailMode); })
       .catch((e) => setError(e.message));
   }, []);
   if (selected)
@@ -31,6 +32,7 @@ export function StudentHome({ user }: { user: Account }) {
         key={selected.id}
         user={user}
         task={selected}
+        localEmailMode={localEmailMode}
         onBack={() => setSelected(undefined)}
       />
     );
@@ -59,10 +61,12 @@ export function StudentHome({ user }: { user: Account }) {
 function StudentTask({
   user,
   task,
+  localEmailMode,
   onBack,
 }: {
   user: Account;
   task: Task;
+  localEmailMode: boolean;
   onBack: () => void;
 }) {
   const { checkIn, setCheckIn } = useCheckInStore();
@@ -117,7 +121,7 @@ function StudentTask({
               <section className="panel">
                 <h2>{labels[checkIn.status]}</h2>
                 <p>{checkIn.rejectReason}</p>
-                {["REJECTED", "EMAIL_ERROR"].includes(checkIn.status) &&
+                {!localEmailMode && ["REJECTED", "EMAIL_ERROR"].includes(checkIn.status) &&
                   inTime && (
                     <button
                       className="command-button"
@@ -126,12 +130,21 @@ function StudentTask({
                       重新打卡
                     </button>
                   )}
+                {localEmailMode && checkIn.status === "REJECTED" && inTime && (
+                  <p>请使用登记邮箱重新发送一封带照片的新邮件，主题仍使用辅导员单独提供的专属主题。</p>
+                )}
                 {checkIn.status === "APPROVED" && (
                   <p>本次返校打卡已审核通过。</p>
                 )}
               </section>
             )}
-            {(!checkIn || checkIn.status === "NOT_CHECKED" || retry) &&
+            {localEmailMode && inTime && (!checkIn || ["NOT_CHECKED", "REJECTED", "EMAIL_ERROR"].includes(checkIn.status)) && (
+              <section className="panel">
+                <h2>通过邮件打卡</h2>
+                <p>使用登记邮箱向 {task.targetEmail} 发送带照片的邮件，主题使用辅导员单独发给你的专属主题。邮件到达后请稍等，状态会自动更新。</p>
+              </section>
+            )}
+            {!localEmailMode && (!checkIn || checkIn.status === "NOT_CHECKED" || retry) &&
               (inTime ? (
                 <Capture
                   user={user}

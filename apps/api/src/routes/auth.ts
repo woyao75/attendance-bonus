@@ -19,7 +19,7 @@ import { fail, route } from "../lib/http.js";
 export const authRouter = Router();
 const cookieOptions = () => ({
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
+  secure: process.env.NODE_ENV === "production" && process.env.LOCAL_EMAIL_MODE !== "true",
   sameSite: "lax" as const,
   path: "/",
 });

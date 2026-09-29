@@ -31,7 +31,7 @@ for (const key of keys) {
       !/replace|example\.com|your-provider|your-school/i.test(value) &&
       (key !== "MAIL_SIGNING_SECRET" || value.length >= 32),
     );
-  console.log(`${key}: ${valid ? "已配置（不显示内容）" : "需要配置"}`);
+  console.log(`${key}: ${optionalInLocalMode ? "本地模式无需配置" : valid ? "已配置（不显示内容）" : "需要配置"}`);
   if (!valid) problems++;
 }
 if (localEmailMode)

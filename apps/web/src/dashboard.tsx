@@ -34,7 +34,9 @@ interface DashboardData {
     lastSuccessAt?: string;
     lastError?: string;
     processedCount: number;
+    failedCount?: number;
     queueLength?: number;
+    outboxQueueLength?: number;
     rejectedMailCount?: number;
   };
   timeDistribution: { time: string; count: number }[];
@@ -69,6 +71,7 @@ const statusLabel: Record<CheckInStatus, string> = {
 
 export function CounselorDashboard({ user }: { user: Account }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [localEmailMode, setLocalEmailMode] = useState(false);
   const [taskId, setTaskId] = useState(
     new URLSearchParams(window.location.search).get("taskId") ?? "",
   );
@@ -84,8 +87,9 @@ export function CounselorDashboard({ user }: { user: Account }) {
   async function loadTasks() {
     const response = await fetch("/api/tasks");
     if (!response.ok) throw new Error("无法加载任务列表");
-    const result = (await response.json()) as { tasks: Task[] };
+    const result = (await response.json()) as { tasks: Task[]; localEmailMode: boolean };
     setTasks(result.tasks);
+    setLocalEmailMode(result.localEmailMode);
     if (!result.tasks.length) setLoading(false);
     if (!taskId && result.tasks[0]) setTaskId(result.tasks[0].id);
   }
@@ -305,6 +309,7 @@ export function CounselorDashboard({ user }: { user: Account }) {
         <ReviewDrawer
           row={selected}
           task={data?.task}
+          localEmailMode={localEmailMode}
           onClose={() => setSelected(undefined)}
           onReview={review}
         />
@@ -417,10 +422,10 @@ function DashboardContent({
             <div className="flex justify-between gap-4">
               <dt className="text-slate-500">队列状态</dt>
               <dd>
-                {data.agent.running ? "抓取中" : "空闲"} · 待发送{" "}
-                {data.agent.queueLength ?? 0}
+                {data.agent.running ? "抓取中" : "空闲"} · 待解析 {data.agent.queueLength ?? 0} · 待发送 {data.agent.outboxQueueLength ?? 0}
               </dd>
             </div>
+            <div className="flex justify-between gap-4"><dt className="text-slate-500">抓取失败次数</dt><dd>{data.agent.failedCount ?? 0}</dd></div>
           </dl>
           {data.agent.lastError && (
             <p className="mt-5 border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-700">
@@ -606,11 +611,13 @@ function MaterialsContent({
 function ReviewDrawer({
   row,
   task,
+  localEmailMode,
   onClose,
   onReview,
 }: {
   row: ReviewRow;
   task?: Task;
+  localEmailMode: boolean;
   onClose: () => void;
   onReview: (status: "APPROVED" | "REJECTED", reason?: string) => Promise<void>;
 }) {
@@ -674,14 +681,14 @@ function ReviewDrawer({
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">GPS 坐标</p>
+              <p className="text-xs text-slate-500">{localEmailMode ? "邮件自报坐标（未经验证）" : "GPS 坐标"}</p>
               <p className="mt-2 font-medium">
                 {row.checkIn?.lat?.toFixed(6) ?? "-"},{" "}
                 {row.checkIn?.lng?.toFixed(6) ?? "-"}
               </p>
             </div>
             <div className="border border-slate-200 p-3">
-              <p className="text-xs text-slate-500">打卡时间</p>
+              <p className="text-xs text-slate-500">{localEmailMode ? "邮箱收件时间" : "打卡时间"}</p>
               <p className="mt-2 font-medium">
                 {row.checkIn?.createdAt
                   ? new Date(row.checkIn.createdAt).toLocaleString()
@@ -692,10 +699,10 @@ function ReviewDrawer({
           <div className="border border-slate-200 p-4">
             <p className="flex items-center gap-2 text-sm font-medium">
               <MapPin size={16} className="text-teal-700" />
-              拍摄位置
+              {localEmailMode ? "邮件位置声明" : "拍摄位置"}
             </p>
             <p className="mt-3 text-xs text-slate-500">
-              拍照时采集的单点坐标，供人工核对。
+              {localEmailMode ? "邮件正文中的位置可由发件人填写，不能作为真实定位证据。" : "拍照时采集的单点坐标，供人工核对。"}
             </p>
             <p className="mt-2 text-xs text-slate-500">
               {row.checkIn?.address || "未提供逆地理编码地址"}

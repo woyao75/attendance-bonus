@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLocalBody, parseLocalSubject } from "./mail-agent.js";
+import { imapFallbackId, isWithinMailWindow, parseLocalBody, parseLocalSubject } from "./mail-agent.js";
 
 const taskId = "cm12345678901234567890123";
 const token = "0123456789abcdef0123456789abcdef";
@@ -37,5 +37,19 @@ describe("local direct email format", () => {
     expect(() =>
       parseLocalSubject(`[返校打卡] 20240101_张三_${taskId}`),
     ).toThrow("mailToken");
+  });
+
+  it("uses mailbox receipt time at the inclusive task boundaries", () => {
+    const start = new Date("2026-09-23T10:00:00Z");
+    const end = new Date("2026-09-23T11:00:00Z");
+    expect(isWithinMailWindow(start, start, end)).toBe(true);
+    expect(isWithinMailWindow(end, start, end)).toBe(true);
+    expect(isWithinMailWindow(new Date("2026-09-23T11:00:01Z"), start, end)).toBe(false);
+    expect(isWithinMailWindow(new Date("invalid"), start, end)).toBe(false);
+  });
+
+  it("uses UIDVALIDITY and UID as a stable fallback when Message-ID is absent", () => {
+    expect(imapFallbackId("archive@example.test", 42n, 9)).toBe(imapFallbackId("archive@example.test", 42n, 9));
+    expect(imapFallbackId("archive@example.test", 42n, 9)).not.toBe(imapFallbackId("archive@example.test", 43n, 9));
   });
 });

@@ -101,6 +101,8 @@ checkInRouter.post(
   roles("STUDENT"),
   upload.single("photo"),
   route(async (req, res) => {
+    if (process.env.LOCAL_EMAIL_MODE === "true")
+      throw fail(409, "本地直收模式请按任务专属主题直接发送邮件，网页拍照提交已停用");
     const input = inputSchema.parse(req.body);
     const task = await accessibleTask(req.auth, input.taskId);
     const now = new Date();

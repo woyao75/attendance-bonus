@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow } from "imapflow";
+import { Prisma } from "@prisma/client";
 import { simpleParser } from "mailparser";
 import sharp from "sharp";
 import { z } from "zod";
@@ -11,10 +12,12 @@ export const mailAgentStatus: {
   running: boolean;
   enabled: boolean;
   lastSuccessAt?: Date;
+  lastScanAt?: Date;
   lastError?: string;
   processedCount: number;
+  failedCount: number;
   queueLength?: number;
-} = { running: false, enabled: false, processedCount: 0 };
+} = { running: false, enabled: false, processedCount: 0, failedCount: 0 };
 
 export const parseCheckInMetadata = (text: string | undefined) => {
   if (!text) throw new Error("Mail body is empty");
@@ -72,9 +75,26 @@ async function rejectLocalMail(input: { messageId: string; taskId?: string; send
   });
 }
 
-async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>) {
-  const messageId = parsed.messageId?.trim();
-  if (!messageId) return false;
+class InvalidLocalMail extends Error {}
+
+export function isWithinMailWindow(receivedAt: Date, startTime: Date, endTime: Date) {
+  return Number.isFinite(receivedAt.getTime()) && receivedAt >= startTime && receivedAt <= endTime;
+}
+
+export function imapFallbackId(account: string, uidValidity: bigint, uid: number) {
+  return `imap:${createHash("sha256").update(`${account}\0${uidValidity}\0${uid}`).digest("hex")}`;
+}
+
+type MailContext = { receivedAt?: Date; fallbackId?: string };
+
+async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>, context: MailContext) {
+  const rawMessageId = parsed.messageId?.trim();
+  const messageId = rawMessageId
+    ? rawMessageId.length <= 320 ? rawMessageId : `msg:${createHash("sha256").update(rawMessageId).digest("hex")}`
+    : context.fallbackId;
+  if (!messageId) throw new Error("IMAP message has no stable identity");
+  const receivedAt = context.receivedAt;
+  if (!receivedAt || !Number.isFinite(receivedAt.getTime())) throw new Error("IMAP internalDate is unavailable");
   if (await prisma.inboundMailLog.findUnique({ where: { messageId } })) return true;
   const sender = senderAddress(parsed);
   const subject = messageSubject(parsed);
@@ -83,35 +103,51 @@ async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>)
   try {
     subjectTaskId = parseLocalSubject(parsed.subject).taskId;
     metadata = parseLocalBody(parsed.text, parsed.subject);
+  } catch (error) {
+    await rejectLocalMail({ messageId, taskId: subjectTaskId, sender, subject, error: error instanceof Error ? error.message : "Invalid mail format" });
+    return true;
+  }
+  try {
     const localMetadata = metadata;
     const member = await prisma.taskMember.findFirst({
       where: { taskId: metadata.taskId, studentId: metadata.studentId },
       include: { task: true, user: true },
     });
-    const now = new Date();
-    if (!member) throw new Error("No matching task member");
-    if (!sender || member.email?.toLowerCase() !== sender) throw new Error("Sender does not match the registered email");
-    if (!member.mailToken || member.mailToken !== metadata.token) throw new Error("Invalid per-student mail token");
-    if (member.name !== metadata.name) throw new Error("Name does not match roster");
-    if (!member.user.active) throw new Error("Student account is disabled");
-    if (member.task.status === "ARCHIVED" || member.task.status === "COMPLETED" || now < member.task.startTime || now > member.task.endTime)
-      throw new Error("Task is outside its active time window");
+    if (!member) throw new InvalidLocalMail("No matching task member");
+    if (!sender || member.email?.toLowerCase() !== sender) throw new InvalidLocalMail("Sender does not match the registered email");
+    if (!member.mailToken || member.mailToken !== metadata.token) throw new InvalidLocalMail("Invalid per-student mail token");
+    if (member.name !== metadata.name) throw new InvalidLocalMail("Name does not match roster");
+    if (!member.user.active) throw new InvalidLocalMail("Student account is disabled");
+    if (member.task.status === "ARCHIVED" || !isWithinMailWindow(receivedAt, member.task.startTime, member.task.endTime))
+      throw new InvalidLocalMail("Task is outside its active time window");
     const existing = await prisma.checkIn.findUnique({ where: { taskId_userId: { taskId: member.taskId, userId: member.userId } } });
     if (existing && !["NOT_CHECKED", "REJECTED", "EMAIL_ERROR"].includes(existing.status))
-      throw new Error("A check-in is already being reviewed or completed");
+      throw new InvalidLocalMail("A check-in is already being reviewed or completed");
     const attachment = parsed.attachments.find((item) => ["image/jpeg", "image/png", "image/webp"].includes(item.contentType));
-    if (!attachment) throw new Error("No supported image attachment");
-    if (attachment.content.length > 8 * 1024 * 1024) throw new Error("Image attachment exceeds 8MB");
-    const photo = await sharp(attachment.content, { limitInputPixels: 20_000_000, failOn: "error" }).rotate().jpeg({ quality: 92 }).toBuffer();
+    if (!attachment) throw new InvalidLocalMail("No supported image attachment");
+    if (attachment.content.length > 8 * 1024 * 1024) throw new InvalidLocalMail("Image attachment exceeds 8MB");
+    let photo: Buffer;
+    try {
+      photo = await sharp(attachment.content, { limitInputPixels: 20_000_000, failOn: "error" }).rotate().jpeg({ quality: 92 }).toBuffer();
+    } catch { throw new InvalidLocalMail("Image attachment is invalid"); }
     const photoHash = createHash("sha256").update(photo).digest("hex");
     const photoUrl = await photoStorage.saveCheckInPhoto(member.taskId, member.userId, { buffer: photo, mimetype: "image/jpeg" });
     let committed = false;
     try {
       await prisma.$transaction(async (tx) => {
+        const credential = await tx.taskMember.updateMany({
+          where: { taskId: member.taskId, userId: member.userId, email: sender, mailToken: localMetadata.token },
+          data: { mailToken: localMetadata.token },
+        });
+        if (!credential.count) throw new InvalidLocalMail("Mail credential was rotated before processing");
+        const current = await tx.checkIn.findUnique({ where: { taskId_userId: { taskId: member.taskId, userId: member.userId } } });
+        if (current && !["NOT_CHECKED", "REJECTED", "EMAIL_ERROR"].includes(current.status))
+          throw new InvalidLocalMail("A check-in is already being reviewed or completed");
         await tx.inboundMailLog.create({ data: { messageId, taskId: member.taskId, sender, subject, status: "ACCEPTED" } });
         await tx.emailLog.create({ data: { taskId: member.taskId, messageId, subject, parseStatus: "success" } });
-        const data = { status: "REVIEWING" as const, photoUrl, photoHash, lat: localMetadata.lat ?? null, lng: localMetadata.lng ?? null, capturedAt: localMetadata.time ? new Date(localMetadata.time) : now, submittedAt: now, emailSubject: subject, emailReceivedAt: now, rejectReason: null, attemptId: randomUUID() };
-        if (existing) await tx.checkIn.update({ where: { id: existing.id }, data });
+        // Local mail has no trusted capture timestamp or GPS proof; server receipt time is authoritative.
+        const data = { status: "REVIEWING" as const, photoUrl, photoHash, lat: localMetadata.lat ?? null, lng: localMetadata.lng ?? null, capturedAt: receivedAt, submittedAt: receivedAt, emailSubject: subject, emailReceivedAt: receivedAt, rejectReason: null, attemptId: randomUUID() };
+        if (current) await tx.checkIn.update({ where: { id: current.id }, data });
         else await tx.checkIn.create({ data: { ...data, taskId: member.taskId, userId: member.userId } });
       });
       committed = true;
@@ -120,17 +156,20 @@ async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>)
       if (!committed) await photoStorage.removeByPublicUrl(photoUrl).catch(() => undefined);
     }
   } catch (error) {
-    await rejectLocalMail({ messageId, taskId: metadata?.taskId ?? subjectTaskId, sender, subject, error: error instanceof Error ? error.message : "Unable to process local mail" }).catch(async (logError) => {
-      if (!String(logError).includes("Unique constraint")) throw logError;
-    });
+    if (!(error instanceof InvalidLocalMail)) throw error;
+    try {
+      await rejectLocalMail({ messageId, taskId: metadata?.taskId ?? subjectTaskId, sender, subject, error: error.message });
+    } catch (logError) {
+      if (!(logError instanceof Prisma.PrismaClientKnownRequestError && logError.code === "P2002")) throw logError;
+    }
     return true;
   }
 }
 
 // Signed messages are generated by this application in hosted mode only.
-export async function ingestMail(source: Buffer) {
+export async function ingestMail(source: Buffer, context: MailContext = {}) {
   const parsed = await simpleParser(source, { skipHtmlToText: true, skipTextToHtml: true });
-  if (process.env.LOCAL_EMAIL_MODE === "true") return ingestLocalMail(parsed);
+  if (process.env.LOCAL_EMAIL_MODE === "true") return ingestLocalMail(parsed, context);
   let metadata;
   try { metadata = parseCheckInMetadata(parsed.text); } catch { return false; }
   const job = await prisma.mailOutbox.findUnique({ where: { id: metadata.attemptId }, include: { checkIn: { include: { task: true } } } });
@@ -156,14 +195,14 @@ let scanOffset = 0;
 async function markHandled(client: ImapFlow, uid: number) {
   const processedMailbox = process.env.IMAP_PROCESSED_MAILBOX?.trim();
   if (processedMailbox) {
-    try { await client.messageMove(uid, processedMailbox, { uid: true }); return; }
+    try { if (await client.messageMove(uid, processedMailbox, { uid: true })) return; }
     catch { /* Folder may not exist; marking it seen is the safe fallback. */ }
   }
-  await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true });
+  if (!(await client.messageFlagsAdd(uid, ["\\Seen"], { uid: true }))) throw new Error("Unable to mark mail as seen");
 }
 export async function runMailAgent() {
   if (mailAgentStatus.running) return;
-  if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASS) { mailAgentStatus.lastError = "IMAP is not configured"; return; }
+  if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASS) { mailAgentStatus.enabled = false; mailAgentStatus.lastError = "IMAP is not configured"; return; }
   mailAgentStatus.running = true;
   mailAgentStatus.enabled = true;
   const client = new ImapFlow({ host: process.env.IMAP_HOST, port: Number(process.env.IMAP_PORT ?? 993), secure: process.env.IMAP_SECURE !== "false", auth: { user: process.env.IMAP_USER, pass: process.env.IMAP_PASS }, logger: false, socketTimeout: 60000 });
@@ -172,22 +211,49 @@ export async function runMailAgent() {
     await client.connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
+      if (!client.mailbox) throw new Error("INBOX is unavailable");
+      const uidValidity = client.mailbox.uidValidity;
       const subject = process.env.LOCAL_EMAIL_MODE === "true" ? "[返校打卡]" : "[打卡]";
-      const uids = (await client.search({ seen: false, subject }, { uid: true })) || [];
+      const uids = await client.search({ seen: false, subject }, { uid: true });
+      if (uids === false) throw new Error("IMAP search failed");
       mailAgentStatus.queueLength = uids.length;
       if (scanOffset >= uids.length) scanOffset = 0;
       const batch = uids.slice(scanOffset, scanOffset + 50);
       scanOffset += batch.length;
+      let handled = 0;
+      let failures = 0;
       for (const uid of batch) {
         try {
-          const info = await client.fetchOne(uid, { size: true }, { uid: true });
-          if (!info || !info.size) continue;
-          if (info.size > 15 * 1024 * 1024) { await markHandled(client, uid); continue; }
+          const info = await client.fetchOne(uid, { size: true, internalDate: true }, { uid: true });
+          if (!info || !info.size) throw new Error("IMAP message size is unavailable");
+          const fallbackId = imapFallbackId(process.env.IMAP_USER!, uidValidity, uid);
+          if (info.size > 15 * 1024 * 1024) {
+            if (!(await prisma.inboundMailLog.findUnique({ where: { messageId: fallbackId } })))
+              await rejectLocalMail({ messageId: fallbackId, sender: null, subject: "(oversized mail)", error: "Message exceeds 15MB" });
+            await markHandled(client, uid);
+            handled++;
+            continue;
+          }
           const message = await client.fetchOne(uid, { source: true }, { uid: true });
-          if (!message || !message.source) continue;
-          if (await ingestMail(message.source)) { await markHandled(client, uid); mailAgentStatus.processedCount++; }
-        } catch { /* Continue with other messages; this one remains unread for retry. */ }
+          if (!message || !message.source) throw new Error("IMAP message source is unavailable");
+          const receivedAt = info.internalDate ? new Date(info.internalDate) : undefined;
+          if (await ingestMail(message.source, { receivedAt, fallbackId })) {
+            await markHandled(client, uid);
+            mailAgentStatus.processedCount++;
+            handled++;
+          } else {
+            // Unknown hosted-mode messages are left unread for manual inspection.
+            failures++;
+          }
+        } catch (error) {
+          failures++;
+          console.error("Mail scan item failed; retaining unread UID", uid, error instanceof Error ? error.name : "UnknownError");
+        }
       }
+      mailAgentStatus.queueLength = uids.length - handled;
+      mailAgentStatus.failedCount += failures;
+      mailAgentStatus.lastScanAt = new Date();
+      if (failures) throw new Error(`${failures} mail item(s) failed; unread messages will be retried`);
     } finally { lock.release(); }
     mailAgentStatus.lastSuccessAt = new Date();
     mailAgentStatus.lastError = undefined;

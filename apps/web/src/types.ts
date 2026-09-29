@@ -11,6 +11,7 @@ export interface Task {
   status: string;
   id: string;
   title: string;
+  targetEmail: string;
   startTime: string;
   endTime: string;
   gestureImgUrl: string | null;

@@ -5,6 +5,9 @@ import { rateLimit } from "express-rate-limit";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import multer from "multer";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { prisma } from "./lib/prisma.js";
 import { authRouter } from "./routes/auth.js";
 import { taskRouter } from "./routes/tasks.js";
@@ -44,6 +47,10 @@ export function createApp() {
     const allowed = (
       process.env.APP_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173"
     ).split(",");
+    if (process.env.LOCAL_EMAIL_MODE === "true" && process.env.NODE_ENV === "production") {
+      const port = Number(process.env.PORT ?? 3000);
+      allowed.push(`http://localhost:${port}`, `http://127.0.0.1:${port}`);
+    }
     if (
       !allowed.includes(req.headers.origin ?? "") ||
       req.headers["x-attendance-request"] !== "1"
@@ -70,6 +77,16 @@ export function createApp() {
   app.use("/api/tasks", taskRouter);
   app.use("/api/check-ins", checkInRouter);
   app.use("/api/manage", managementRouter);
+  if (process.env.LOCAL_EMAIL_MODE === "true" && process.env.NODE_ENV === "production") {
+    const dist = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+    const index = path.join(dist, "index.html");
+    if (!existsSync(index)) throw new Error("缺少前端构建产物，请先运行 npm run build");
+    app.use(express.static(dist, { index: false }));
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api") || path.extname(req.path) || !req.accepts("html")) return next();
+      res.sendFile(index, (error) => { if (error) next(error); });
+    });
+  }
   app.use((_req, res) => {
     res.status(404).json({ message: "接口不存在" });
   });
