@@ -14,3 +14,4 @@ apps/web/vite.config.d.ts
 backups/
 提示词.md
 需求.md
+.codegraph/
