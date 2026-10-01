@@ -23,6 +23,8 @@ npm.cmd run local:start
 
 `admin:create` 需临时设置 ADMIN_ACCOUNT、ADMIN_PASSWORD；创建后移除密码配置。首次登录必须改密。日常启动只需先确认 MySQL 服务运行，再执行 `npm.cmd run local:start`，打开 http://127.0.0.1:3000 。命令窗口保持打开；关闭它会停止 API 和邮件 Agent。前端代码更新后重新执行 `npm.cmd run build`。`npm run local` 仍保留为开发模式，使用 5173 端口。
 
+本地备份：先关闭 `local:start`，再运行 `npm.cmd run backup:local -- --check` 和 `npm.cmd run backup:local -- --stopped`。备份校验、隔离恢复和照片保留规则见 [部署手册](docs/DEPLOYMENT.md)。
+
 已有数据库先备份再升级。可运行 `npm run doctor -w @attendance/api` 检查缺少的配置和数据表，检查过程不显示凭据、不发送邮件。
 
 ## 项目目录

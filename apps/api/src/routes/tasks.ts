@@ -15,6 +15,7 @@ import {
 import { mailAgentStatus } from "../services/mail-agent.js";
 import { readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { archiveTask } from "../services/task-lifecycle.js";
 export const taskRouter = Router();
 async function agentSnapshot() {
   try {
@@ -191,31 +192,10 @@ taskRouter.patch(
     if (task.endTime > new Date()) throw fail(409, "任务结束后才能归档");
     if (process.env.LOCAL_EMAIL_MODE === "true") {
       const agent = await agentSnapshot();
-      if (agent.lastError || agent.queueLength !== 0 || !agent.lastSuccessAt || new Date(agent.lastSuccessAt) <= task.endTime)
+      if (agent.running || agent.lastError || agent.queueLength !== 0 || !agent.lastSuccessAt || new Date(agent.lastSuccessAt) <= task.endTime)
         throw fail(409, "请等待任务结束后的邮件服务完整扫描，并清理待处理邮件后再归档");
     }
-    if (
-      await prisma.checkIn.count({
-        where: {
-          taskId: task.id,
-          status: { in: ["EMAIL_PENDING", "EMAIL_SENT", "REVIEWING"] },
-        },
-      })
-    )
-      throw fail(409, "请先处理待发送、待收件和待审核记录");
-    await prisma.$transaction([
-      prisma.task.update({
-        where: { id: task.id },
-        data: { status: "ARCHIVED" },
-      }),
-      prisma.auditLog.create({
-        data: {
-          actorId: req.auth.id,
-          action: "TASK_ARCHIVED",
-          targetId: task.id,
-        },
-      }),
-    ]);
+    await archiveTask(task.id, req.auth.id);
     res.json({ ok: true });
   }),
 );

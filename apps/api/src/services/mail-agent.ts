@@ -7,6 +7,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { photoStorage } from "../lib/storage.js";
 import { parseSignedMail } from "./check-in-mailer.js";
+import { lockTaskForUpdate } from "./task-lifecycle.js";
 
 export const mailAgentStatus: {
   running: boolean;
@@ -133,8 +134,12 @@ async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>,
     const photoHash = createHash("sha256").update(photo).digest("hex");
     const photoUrl = await photoStorage.saveCheckInPhoto(member.taskId, member.userId, { buffer: photo, mimetype: "image/jpeg" });
     let committed = false;
+    let previousPhotoUrl: string | null = null;
     try {
       await prisma.$transaction(async (tx) => {
+        const task = await lockTaskForUpdate(tx, member.taskId);
+        if (!task || task.status === "ARCHIVED" || !isWithinMailWindow(receivedAt, task.startTime, task.endTime))
+          throw new InvalidLocalMail("Task is outside its active time window");
         const credential = await tx.taskMember.updateMany({
           where: { taskId: member.taskId, userId: member.userId, email: sender, mailToken: localMetadata.token },
           data: { mailToken: localMetadata.token },
@@ -149,8 +154,11 @@ async function ingestLocalMail(parsed: Awaited<ReturnType<typeof simpleParser>>,
         const data = { status: "REVIEWING" as const, photoUrl, photoHash, lat: localMetadata.lat ?? null, lng: localMetadata.lng ?? null, capturedAt: receivedAt, submittedAt: receivedAt, emailSubject: subject, emailReceivedAt: receivedAt, rejectReason: null, attemptId: randomUUID() };
         if (current) await tx.checkIn.update({ where: { id: current.id }, data });
         else await tx.checkIn.create({ data: { ...data, taskId: member.taskId, userId: member.userId } });
+        previousPhotoUrl = current?.photoUrl ?? null;
       });
       committed = true;
+      if (previousPhotoUrl && previousPhotoUrl !== photoUrl)
+        await photoStorage.removeByPublicUrl(previousPhotoUrl).catch(() => console.error("Unable to remove replaced local check-in photo"));
       return true;
     } finally {
       if (!committed) await photoStorage.removeByPublicUrl(photoUrl).catch(() => undefined);

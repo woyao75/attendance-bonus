@@ -14,7 +14,9 @@
     "test": "npm run test -w @attendance/api",
     "test:browser": "node scripts/test-browser.mjs",
     "test:pwa": "node scripts/test-pwa.mjs",
-    "test:upgrade": "node scripts/test-upgrade.mjs"
+    "test:upgrade": "node scripts/test-upgrade.mjs",
+    "backup:local": "node scripts/backup-local.mjs",
+    "backup:verify": "node scripts/backup-local.mjs --verify"
   },
   "overrides": {
     "@types/express": "$@types/express",
