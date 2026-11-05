@@ -23,7 +23,7 @@ def source_key(account, validity, uid, part_index):
     return json.dumps([account.casefold(), "INBOX", validity, uid, part_index], ensure_ascii=False, separators=(",", ":"))
 
 def email_received_time(metadata):
-    match = re.search(rb'INTERNALDATE "([^"]+)"', metadata)
+    match = re.search(rb'\bINTERNALDATE[ \t]+"([^"]+)"', metadata, re.IGNORECASE)
     if not match:
         raise MVPError("服务器没有提供 INTERNALDATE，未推进邮件处理进度。")
     try:
@@ -35,6 +35,23 @@ def email_received_time(metadata):
         return received.isoformat()
     except (ValueError, TypeError, UnicodeError):
         raise MVPError("服务器收件时间无法解析，未推进邮件处理进度。") from None
+
+
+def fetch_metadata(response):
+    """收集 FETCH 的全部元数据，排除 tuple 中的邮件正文 literal。
+
+    imaplib 将正文拆为 (正文前元数据, 正文字节)，后续元数据单独返回。
+    QQ 邮箱可把 INTERNALDATE 放在正文后，因此不能只读取 tuple[0]。
+    严禁把正文拼入这里，避免邮件中的伪造字段被当作服务器收件时间。
+    """
+    parts = []
+    for item in response:
+        if isinstance(item, tuple):
+            if item and isinstance(item[0], bytes):
+                parts.append(item[0])
+        elif isinstance(item, bytes):
+            parts.append(item)
+    return b" ".join(parts)
 
 def attachment_rows(raw_email, metadata, config: AppConfig, validity, uid, store, work_dir=Path(".")):
     message = BytesParser(policy=policy.default).parsebytes(raw_email)
@@ -130,10 +147,11 @@ def fetch_emails(config: AppConfig, store: DataStore, work_dir=Path("."), progre
                 raise MVPError(f"UID {uid} 超过 max_email_bytes；请调高限制后重试，或人工移出收件箱。")
             status, data = connection.uid("FETCH", str(uid), "(BODY.PEEK[] INTERNALDATE)")
             require_ok(status, "下载邮件")
-            body = next((item for item in data if isinstance(item, tuple) and isinstance(item[1], bytes)), None)
+            body = next((item for item in data if isinstance(item, tuple) and len(item) == 2
+                         and isinstance(item[1], bytes)), None)
             if body is None:
                 raise MVPError(f"UID {uid} 下载不完整，停止处理；下次可重试。")
-            rows = attachment_rows(body[1], body[0], config, validity, uid, store, Path(work_dir))
+            rows = attachment_rows(body[1], fetch_metadata(data), config, validity, uid, store, Path(work_dir))
             checkpoint = dict(account=account, mailbox="INBOX", uidvalidity=validity, last_uid=uid)
             total += store.commit_batch(rows, checkpoint)
             if progress:
