@@ -1,0 +1,159 @@
+/* 校园考勤簿：校务靛蓝、纸白页面与安静的数据排版。无需外部字体服务。 */
+:root {
+  --attendance-paper: #ffffff;
+  --attendance-mist: #f1f5fa;
+  --attendance-blue: #274690;
+  --attendance-ink: #182c4d;
+  --attendance-muted: #586780;
+  --attendance-rule: #dce4f0;
+  --attendance-amber: #a65b16;
+}
+
+.stApp {
+  font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+  color: var(--attendance-ink);
+  background: var(--attendance-mist);
+}
+.stApp h1, .stApp h2, .stApp h3, .stApp p, .stApp button, .stApp input {
+  font-family: inherit;
+}
+[data-testid="stMainBlockContainer"] {
+  max-width: 1560px;
+  padding: 2.3rem 2.8rem 3rem;
+}
+[data-testid="stHeader"] { background: var(--attendance-mist); }
+.attendance-masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: .4rem 0 1.7rem;
+  border-bottom: 3px solid var(--attendance-ink);
+  margin-bottom: .65rem;
+}
+.attendance-masthead h1 {
+  font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(1.7rem, 2.8vw, 2.35rem);
+  line-height: 1.5;
+  font-weight: 650;
+  letter-spacing: .025em;
+  padding: 0;
+  margin: 0 0 .45rem;
+}
+.attendance-masthead p { color: var(--attendance-muted); margin: 0; font-size: .9rem; line-height: 1.8; }
+.attendance-date {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: .95rem;
+}
+.attendance-date-day {
+  font-size: 2.4rem;
+  line-height: 1;
+  font-weight: 650;
+  color: var(--attendance-blue);
+  font-variant-numeric: tabular-nums;
+  padding-right: .95rem;
+  border-right: 1px solid #b9c9e3;
+}
+.attendance-date-detail { font-size: .8rem; line-height: 1.9; color: var(--attendance-muted); }
+.attendance-date-detail strong { color: var(--attendance-ink); font-weight: 600; display: block; }
+.attendance-section-heading { margin: .45rem 0 .75rem; }
+.attendance-section-heading h2 { font-size: 1.2rem; font-weight: 650; margin: 0 0 .3rem; padding: 0; }
+.attendance-section-heading p { font-size: .82rem; color: var(--attendance-muted); line-height: 1.8; margin: 0; max-width: 70ch; }
+
+/* 概览是一个连续的数据带，避免每个数字各占一张卡片。 */
+.st-key-overview {
+  padding: 1rem 1.3rem;
+  background: var(--attendance-paper);
+  border: 1px solid var(--attendance-rule);
+  border-radius: 10px;
+  margin: .2rem 0 .3rem;
+}
+.st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { border-left: 1px solid var(--attendance-rule); padding-left: 1.3rem; }
+[data-testid="stMetricLabel"] { color: var(--attendance-muted); font-size: .82rem; }
+[data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; font-size: 2rem; font-weight: 600; line-height: 1.35; }
+.st-key-overview [data-testid="stColumn"]:last-child [data-testid="stMetricValue"] { color: var(--attendance-amber); }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: var(--attendance-muted); line-height: 1.7; }
+[data-testid="stTabs"] [data-baseweb="tab-list"] { gap: 1.7rem; background: transparent; }
+[data-testid="stTabs"] [data-baseweb="tab"] { padding: .7rem .2rem .85rem; height: auto; font-weight: 600; }
+[data-testid="stTabs"] [data-baseweb="tab"] p { font-size: .97rem; }
+[data-testid="stTabs"] [role="tabpanel"] { padding-top: 1.25rem; }
+.st-key-record_workspace {
+  background: var(--attendance-paper);
+  padding: 1.15rem;
+  border-color: var(--attendance-rule);
+  border-radius: 12px;
+}
+.st-key-photo_review { padding-left: .45rem; }
+.st-key-photo_review [data-testid="stImage"] { background: var(--attendance-mist); border: 1px solid var(--attendance-rule); border-radius: 8px; overflow: hidden; }
+.st-key-photo_review [data-testid="stImage"] img { max-height: 320px; object-fit: contain; }
+.attendance-photo-empty {
+  display: grid;
+  place-items: center;
+  min-height: 135px;
+  border: 1px dashed #b9c9e3;
+  border-radius: 8px;
+  background: #f8faff;
+  color: var(--attendance-muted);
+  text-align: center;
+  font-size: .85rem;
+  margin: .2rem 0 .7rem;
+}
+.attendance-photo-empty svg { width: 30px; height: 30px; stroke: #7c90b0; margin: .2rem auto .5rem; display: block; }
+[data-testid="stDataFrame"] { border: 1px solid var(--attendance-rule); border-radius: 8px; overflow: hidden; }
+[data-testid="stAlert"] { border-radius: 8px; }
+[data-testid="stExpander"] { border-color: var(--attendance-rule); border-radius: 8px; }
+button, input, select, textarea, [role="tab"], [role="combobox"] { scroll-margin-top: 5rem; }
+button:focus-visible, input:focus-visible, a:focus-visible, [role="tab"]:focus-visible {
+  outline: 3px solid #5276c4 !important;
+  outline-offset: 3px;
+}
+
+/* 侧栏作为日常操作台；配置置后，输入依然使用原生可访问控件。 */
+[data-testid="stSidebar"] { background: var(--attendance-ink); border-right: none; }
+[data-testid="stSidebarUserContent"] { padding: 1.8rem 1.4rem 2rem; }
+.attendance-brand { display: flex; gap: .8rem; align-items: center; margin: .15rem 0 1.9rem; }
+.attendance-brand-mark { color: #c6d7ff; width: 41px; height: 46px; flex-shrink: 0; }
+.attendance-brand strong { display: block; font-size: 1.2rem; font-weight: 650; letter-spacing: .08em; color: #ffffff; }
+.attendance-brand span { color: #b7c7e1; font-size: .78rem; display: block; margin-top: .15rem; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: #b7c7e1; }
+[data-testid="stSidebar"] h3 { font-size: .95rem; font-weight: 600; }
+[data-testid="stSidebar"] hr { border-color: #3c5070; margin: 1.2rem 0; }
+[data-testid="stSidebar"] [data-testid="stExpander"] { border-color: #455a7c; background: transparent; }
+[data-testid="stSidebar"] [data-testid="stForm"] { border: 0; padding: 0; }
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
+  background: #bfd1ff; color: #142a50; border-color: #bfd1ff; font-weight: 650;
+}
+[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover { background: #d4e0ff; border-color: #d4e0ff; }
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] { border-color: #536b90; background: transparent; color: #eff4ff; }
+[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover { background: #2a4267; border-color: #8ba5ce; }
+[data-testid="stSidebar"] button:disabled { opacity: .5; }
+[data-testid="stSidebar"] button:focus-visible, [data-testid="stSidebar"] input:focus-visible { outline-color: #bfd1ff !important; }
+
+@media (max-width: 1100px) {
+  [data-testid="stMainBlockContainer"] { padding-left: 1.5rem; padding-right: 1.5rem; }
+  .attendance-masthead { gap: 1rem; }
+  .attendance-date-day { font-size: 2rem; }
+  .st-key-overview { padding: .9rem 1rem; }
+  .st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { padding-left: .6rem; }
+}
+@media (max-width: 760px) {
+  [data-testid="stMainBlockContainer"] { padding: 3.6rem 1rem 2rem; }
+  .attendance-masthead { align-items: flex-start; flex-direction: column; gap: 1rem; padding-bottom: 1.1rem; }
+  .attendance-date-day { font-size: 1.7rem; }
+  .attendance-date-detail { font-size: .75rem; }
+  .st-key-overview [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 1rem; }
+  .st-key-overview [data-testid="stColumn"] { flex: 1 1 calc(50% - 1rem); min-width: calc(50% - 1rem); }
+  .st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { border-left: none; padding-left: 0; }
+  [data-testid="stMetricValue"] { font-size: 1.7rem; }
+  [data-testid="stTabs"] [data-baseweb="tab-list"] { gap: 1.1rem; }
+  .st-key-record_workspace { padding: .8rem; }
+  .st-key-record_workspace > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+  .st-key-record_workspace > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex: 1 1 100%; min-width: 100%; }
+  .st-key-photo_review { padding-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

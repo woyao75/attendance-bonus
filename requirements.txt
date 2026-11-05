@@ -1,3 +1,9 @@
+# EXIF Software 标签校验复用 ExifRead，无新增第三方依赖。
 exifread>=3.0,<4
 pandas>=2.2,<4
 openpyxl>=3.1,<4
+pydantic>=2.12,<3
+python-dotenv>=1.1,<2
+streamlit>=1.50,<2
+ImageHash>=4.3,<5
+Pillow>=10,<14

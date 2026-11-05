@@ -1,0 +1,12 @@
+{
+  "email_account": "your_qq@qq.com",
+  "target_lat": 39.9042,
+  "target_lon": 116.4074,
+  "threshold_meters": 200.0,
+  "phash_distance_threshold": 5,
+  "attendance_start": "",
+  "attendance_end": "",
+  "photo_timezone": "+08:00",
+  "max_attachment_bytes": 10485760,
+  "max_email_bytes": 26214400
+}

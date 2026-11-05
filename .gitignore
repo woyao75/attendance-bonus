@@ -8,3 +8,9 @@ attachments/
 *.xlsx
 .mvp_agent.lock
 .mvp-*
+.env
+.env.*
+!.env.example
+logs/
+data/
+.streamlit/secrets.toml
