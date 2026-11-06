@@ -7,6 +7,11 @@
   --attendance-muted: #586780;
   --attendance-rule: #dce4f0;
   --attendance-amber: #a65b16;
+  --attendance-success: #235c47;
+  --attendance-success-bg: #edf6f0;
+  --attendance-warning-bg: #fff5e6;
+  --attendance-focus: #5276c4;
+  --attendance-radius: .5rem;
 }
 
 .stApp {
@@ -19,26 +24,26 @@
 }
 [data-testid="stMainBlockContainer"] {
   max-width: 1560px;
-  padding: 2.3rem 2.8rem 3rem;
+  padding: 2rem 2.5rem 3rem;
 }
 [data-testid="stHeader"] { background: var(--attendance-mist); }
 .attendance-masthead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 2rem;
-  padding: .4rem 0 1.7rem;
-  border-bottom: 3px solid var(--attendance-ink);
-  margin-bottom: .65rem;
+  gap: 1.5rem;
+  padding: .25rem 0 1.25rem;
+  border-bottom: 2px solid var(--attendance-ink);
+  margin-bottom: .25rem;
 }
 .attendance-masthead h1 {
   font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
-  font-size: clamp(1.7rem, 2.8vw, 2.35rem);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
   line-height: 1.5;
   font-weight: 650;
   letter-spacing: .025em;
   padding: 0;
-  margin: 0 0 .45rem;
+  margin: 0 0 .25rem;
 }
 .attendance-masthead p { color: var(--attendance-muted); margin: 0; font-size: .9rem; line-height: 1.8; }
 .attendance-date {
@@ -61,33 +66,49 @@
 .attendance-section-heading { margin: .45rem 0 .75rem; }
 .attendance-section-heading h2 { font-size: 1.2rem; font-weight: 650; margin: 0 0 .3rem; padding: 0; }
 .attendance-section-heading p { font-size: .82rem; color: var(--attendance-muted); line-height: 1.8; margin: 0; max-width: 70ch; }
+.attendance-panel-title { font-size: 1rem !important; font-weight: 650; margin: 0; padding: 0 0 .25rem !important; }
+.attendance-overview-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; }
+.attendance-overview-heading h2 { font-size: .9rem; margin: 0; padding: 0; font-weight: 650; }
+.attendance-overview-heading span { color: var(--attendance-muted); font-size: .75rem; }
 
 /* 概览是一个连续的数据带，避免每个数字各占一张卡片。 */
 .st-key-overview {
-  padding: 1rem 1.3rem;
+  padding: 1rem 1.25rem;
   background: var(--attendance-paper);
   border: 1px solid var(--attendance-rule);
-  border-radius: 10px;
+  border-radius: var(--attendance-radius);
   margin: .2rem 0 .3rem;
 }
-.st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { border-left: 1px solid var(--attendance-rule); padding-left: 1.3rem; }
+.st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { border-left: 1px solid var(--attendance-rule); padding-left: 1.25rem; }
 [data-testid="stMetricLabel"] { color: var(--attendance-muted); font-size: .82rem; }
 [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; font-size: 2rem; font-weight: 600; line-height: 1.35; }
-.st-key-overview [data-testid="stColumn"]:last-child [data-testid="stMetricValue"] { color: var(--attendance-amber); }
+.st-key-overview [data-testid="stColumn"]:nth-child(2) [data-testid="stMetricValue"] { color: var(--attendance-success); }
+.st-key-overview [data-testid="stColumn"]:nth-child(n+3) [data-testid="stMetricValue"] { color: var(--attendance-amber); }
+.st-key-student_metrics { background: var(--attendance-paper); border: 1px solid var(--attendance-rule); border-radius: var(--attendance-radius); padding: 1rem 1.25rem; }
+.st-key-student_metrics > [data-testid="stLayoutWrapper"] + [data-testid="stLayoutWrapper"] { border-top: 1px solid var(--attendance-rule); padding-top: 1rem; }
+.st-key-student_metrics [data-testid="stMetricValue"] { font-size: 1.75rem; }
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: var(--attendance-muted); line-height: 1.7; }
+[data-testid="stCaptionContainer"] { opacity: 1; }
 [data-testid="stTabs"] [data-baseweb="tab-list"] { gap: 1.7rem; background: transparent; }
 [data-testid="stTabs"] [data-baseweb="tab"] { padding: .7rem .2rem .85rem; height: auto; font-weight: 600; }
 [data-testid="stTabs"] [data-baseweb="tab"] p { font-size: .97rem; }
-[data-testid="stTabs"] [role="tabpanel"] { padding-top: 1.25rem; }
+[data-testid="stTabs"] [role="tabpanel"] { padding-top: 1rem; }
 .st-key-record_workspace {
   background: var(--attendance-paper);
-  padding: 1.15rem;
+  padding: 1.25rem;
   border-color: var(--attendance-rule);
-  border-radius: 12px;
+  border-radius: var(--attendance-radius);
 }
-.st-key-photo_review { padding-left: .45rem; }
+.st-key-photo_review { padding-left: 1.25rem; border-left: 1px solid var(--attendance-rule); }
 .st-key-photo_review [data-testid="stImage"] { background: var(--attendance-mist); border: 1px solid var(--attendance-rule); border-radius: 8px; overflow: hidden; }
-.st-key-photo_review [data-testid="stImage"] img { max-height: 320px; object-fit: contain; }
+.st-key-photo_review [data-testid="stImage"] img { max-height: 400px; object-fit: contain; }
+.st-key-photo_review [data-testid="stImageCaption"] { overflow-wrap: anywhere; padding: .5rem; }
+.attendance-verdict { display: flex; align-items: flex-start; gap: .75rem; padding: .75rem; border: 1px solid currentColor; border-radius: var(--attendance-radius); overflow-wrap: anywhere; }
+.attendance-verdict-success { color: var(--attendance-success); background: var(--attendance-success-bg); }
+.attendance-verdict-warning { color: var(--attendance-amber); background: var(--attendance-warning-bg); }
+.attendance-verdict-symbol { display: grid; place-items: center; flex: 0 0 1.5rem; height: 1.5rem; border: 1px solid currentColor; border-radius: 50%; font-weight: 700; }
+.attendance-verdict strong { display: block; font-size: .875rem; line-height: 1.5; }
+.attendance-verdict p { margin: .25rem 0 0; font-size: .8125rem; line-height: 1.65; color: inherit; }
 .attendance-photo-empty {
   display: grid;
   place-items: center;
@@ -105,21 +126,22 @@
 [data-testid="stAlert"] { border-radius: 8px; }
 [data-testid="stExpander"] { border-color: var(--attendance-rule); border-radius: 8px; }
 button, input, select, textarea, [role="tab"], [role="combobox"] { scroll-margin-top: 5rem; }
-button:focus-visible, input:focus-visible, a:focus-visible, [role="tab"]:focus-visible {
-  outline: 3px solid #5276c4 !important;
+button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible, [role="tab"]:focus-visible, [role="combobox"]:focus-visible {
+  outline: 3px solid var(--attendance-focus) !important;
   outline-offset: 3px;
 }
 
 /* 侧栏作为日常操作台；配置置后，输入依然使用原生可访问控件。 */
 [data-testid="stSidebar"] { background: var(--attendance-ink); border-right: none; }
-[data-testid="stSidebarUserContent"] { padding: 1.8rem 1.4rem 2rem; }
-.attendance-brand { display: flex; gap: .8rem; align-items: center; margin: .15rem 0 1.9rem; }
+[data-testid="stSidebarUserContent"] { padding: 1.5rem 1.25rem 2rem; }
+.attendance-brand { display: flex; gap: .75rem; align-items: center; margin: 0 0 1.5rem; }
 .attendance-brand-mark { color: #c6d7ff; width: 41px; height: 46px; flex-shrink: 0; }
 .attendance-brand strong { display: block; font-size: 1.2rem; font-weight: 650; letter-spacing: .08em; color: #ffffff; }
 .attendance-brand span { color: #b7c7e1; font-size: .78rem; display: block; margin-top: .15rem; }
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: #b7c7e1; }
 [data-testid="stSidebar"] h3 { font-size: .95rem; font-weight: 600; }
+[data-testid="stSidebar"] .attendance-panel-title { margin-bottom: .5rem; }
 [data-testid="stSidebar"] hr { border-color: #3c5070; margin: 1.2rem 0; }
 [data-testid="stSidebar"] [data-testid="stExpander"] { border-color: #455a7c; background: transparent; }
 [data-testid="stSidebar"] [data-testid="stForm"] { border: 0; padding: 0; }
@@ -136,23 +158,26 @@ button:focus-visible, input:focus-visible, a:focus-visible, [role="tab"]:focus-v
   [data-testid="stMainBlockContainer"] { padding-left: 1.5rem; padding-right: 1.5rem; }
   .attendance-masthead { gap: 1rem; }
   .attendance-date-day { font-size: 2rem; }
-  .st-key-overview { padding: .9rem 1rem; }
-  .st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { padding-left: .6rem; }
+  .st-key-overview { padding: 1rem; }
+  .st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { padding-left: .5rem; }
+  .st-key-record_workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+  .st-key-record_workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex: 1 1 100%; min-width: 100%; }
+  .st-key-photo_review { padding: 1rem 0 0; border-left: 0; border-top: 1px solid var(--attendance-rule); }
 }
 @media (max-width: 760px) {
   [data-testid="stMainBlockContainer"] { padding: 3.6rem 1rem 2rem; }
-  .attendance-masthead { align-items: flex-start; flex-direction: column; gap: 1rem; padding-bottom: 1.1rem; }
+  .attendance-masthead { align-items: flex-start; flex-direction: column; gap: 1rem; padding-bottom: 1rem; }
   .attendance-date-day { font-size: 1.7rem; }
   .attendance-date-detail { font-size: .75rem; }
-  .st-key-overview [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 1rem; }
-  .st-key-overview [data-testid="stColumn"] { flex: 1 1 calc(50% - 1rem); min-width: calc(50% - 1rem); }
+  .st-key-overview [data-testid="stHorizontalBlock"], .st-key-student_metrics [data-testid="stHorizontalBlock"] { flex-wrap: wrap; gap: 1rem; }
+  .st-key-overview [data-testid="stColumn"], .st-key-student_metrics [data-testid="stColumn"] { flex: 1 1 calc(50% - 1rem); min-width: calc(50% - 1rem); }
   .st-key-overview [data-testid="stColumn"] + [data-testid="stColumn"] { border-left: none; padding-left: 0; }
   [data-testid="stMetricValue"] { font-size: 1.7rem; }
   [data-testid="stTabs"] [data-baseweb="tab-list"] { gap: 1.1rem; }
-  .st-key-record_workspace { padding: .8rem; }
-  .st-key-record_workspace > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
-  .st-key-record_workspace > [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex: 1 1 100%; min-width: 100%; }
-  .st-key-photo_review { padding-left: 0; }
+  .st-key-record_workspace { padding: .75rem; }
+  [data-testid="stMetricLabel"] p { white-space: normal; }
+  [data-testid="stTabs"] [data-baseweb="tab"] { min-height: 44px; }
+  [data-testid="stSidebar"] { max-width: calc(100vw - 2rem); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

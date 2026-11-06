@@ -4,6 +4,6 @@ pandas>=2.2,<4
 openpyxl>=3.1,<4
 pydantic>=2.12,<3
 python-dotenv>=1.1,<2
-streamlit>=1.50,<2
+streamlit>=1.66,<2
 ImageHash>=4.3,<5
 Pillow>=10,<14

@@ -46,6 +46,15 @@ def photo_placeholder():
       </svg>暂无可用照片</div></div>""", unsafe_allow_html=True)
 
 
+def photo_verdict(valid, reason):
+    """用文字、图形与颜色共同展示选中照片的基础校验结果。"""
+    tone, symbol, label = ("success", "✓", "基础校验通过") if valid else ("warning", "!", "需要人工核验")
+    st.markdown(f'<div class="attendance-verdict attendance-verdict-{tone}" role="status">'
+                f'<span class="attendance-verdict-symbol" aria-hidden="true">{symbol}</span>'
+                f'<div><strong>{label}</strong><p>{escape(reason or "请查看照片校验详情")}</p></div></div>',
+                unsafe_allow_html=True)
+
+
 def status_style(value):
     """表格颜色是文字状态的补充，保留文本以便色觉异常用户辨识。"""
     if value in ("疑似重复", "校验异常", "无效", "未提交", "未通过", "姓名不匹配"):

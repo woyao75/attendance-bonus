@@ -18,7 +18,7 @@ from src.report_generator import generate_report, generate_student_attendance_re
 from src.photo_deduplicator import validate_threshold
 from src.web_helpers import safe_photo_path
 from src.student_roster import parse_student_roster
-from src.ui import load_styles, masthead, photo_placeholder, section_heading, sidebar_brand, styled_statuses
+from src.ui import load_styles, masthead, photo_placeholder, photo_verdict, section_heading, sidebar_brand, styled_statuses
 
 
 WORK_DIR = Path(os.environ.get("ATTENDANCE_WORK_DIR", Path(__file__).resolve().parent)).resolve()
@@ -64,7 +64,7 @@ def settings_panel():
             start = st.text_input("窗口开始", value=business["attendance_start"], placeholder="2026-11-05T08:00:00+08:00")
             end = st.text_input("窗口结束", value=business["attendance_end"], placeholder="2026-11-05T10:00:00+08:00")
             photo_tz = st.text_input("照片默认时区", value=business["photo_timezone"])
-            st.caption("开始与结束均留空时，校验照片软件信息及坐标。")
+            st.caption("请填写完整日期、时间及时区，例如 2026-11-06T08:00:00+08:00。开始与结束均留空可关闭拍摄时间校验。")
         save = st.form_submit_button("保存配置", use_container_width=True)
     st.caption("新配置用于后续新提交，已有校验结果不会重新计算。")
     if save:
@@ -86,7 +86,7 @@ def sidebar(store):
     with st.sidebar:
         sidebar_brand()
 
-        st.subheader("日常操作")
+        st.markdown('<h2 class="attendance-panel-title">日常操作</h2>', unsafe_allow_html=True)
         if st.button("一键拉取并校验", type="primary", use_container_width=True, disabled=store is None):
             progress = None
             try:
@@ -156,7 +156,7 @@ def sidebar(store):
         with st.expander("学生如何提交？"):
             st.write("邮件主题填写“姓名+学号”，例如 张三+0020230001，附上 JPG/JPEG 原图。")
             st.caption("请发送原图，聊天软件压缩或截图可能丢失定位和拍摄时间。")
-        st.caption("授权码保存在本机，页面不会回显。")
+        st.caption("本地工作台 · 授权码保存在本机")
 
 
 def roster_import(store):
@@ -234,18 +234,21 @@ def student_statistics(store):
                                   format_func=lambda value: "全部班级" if value is None else value or "未分班")
     result = store.student_attendance(day.isoformat(), class_name=selected_class)
     stats = result["statistics"]
-    for column, label, key in zip(st.columns(5), ("名单人数", "已提交人数", "校验通过人数", "待核验人数", "未提交人数"),
-                                  ("total", "submitted", "passed", "pending", "missing")):
-        column.metric(label, stats[key])
-    for column, label, key in zip(st.columns(3), ("老师代签人数", "请假人数", "出勤人数（含代签）"),
-                                  ("signed", "leave", "present")):
-        column.metric(label, stats[key])
-    st.caption("按北京时间收件日期统计，单位为学生；同一学生多张照片只计一人。姓名须与名单一致，至少一张照片通过基础校验才计为通过。")
-    st.caption("姓名不匹配或照片未通过归入待核验；照片重复与 pHash 结果仍在打卡记录中单独展示。")
-    st.caption("老师代签计为出勤，请假单独统计；两者均不再计入未提交或待核验。已提交人数仅表示收到照片。")
+    with st.container(key="student_metrics"):
+        for column, label, key in zip(st.columns(5), ("名单人数", "已提交人数", "校验通过人数", "待核验人数", "未提交人数"),
+                                      ("total", "submitted", "passed", "pending", "missing")):
+            column.metric(label, stats[key])
+        for column, label, key in zip(st.columns(3), ("老师代签人数", "请假人数", "出勤人数（含代签）"),
+                                      ("signed", "leave", "present")):
+            column.metric(label, stats[key])
+    st.caption(f"统计范围：{day:%Y年%m月%d日} · {(selected_class or '未分班') if selected_class is not None else '全部班级'} · 按学生人数统计")
+    with st.expander("考勤人数如何计算？"):
+        st.write("按北京时间收件日期统计，单位为学生；同一学生多张照片只计一人。姓名须与名单一致，至少一张照片通过基础校验才计为通过。")
+        st.write("姓名不匹配或照片未通过归入待核验；照片重复判定仍在照片核验中单独展示。")
+        st.write("老师代签计为出勤，请假单独统计；两者均不再计入未提交或待核验。已提交人数仅表示收到照片。")
     teacher_attendance_panel(store, day, result["students"])
     if result["classes"]:
-        st.markdown("**班级汇总**")
+        st.markdown('<h3 class="attendance-panel-title">班级汇总</h3>', unsafe_allow_html=True)
         class_frame = pd.DataFrame(result["classes"])
         class_frame["class_name"] = class_frame["class_name"].replace("", "未分班")
         st.dataframe(class_frame.rename(columns={"class_name": "班级", "total": "名单人数", "submitted": "已提交人数",
@@ -288,11 +291,12 @@ def overview(store):
     with st.spinner("正在读取考勤数据…"):
         stats = store.statistics()
     with st.container(key="overview"):
+        st.markdown('<div class="attendance-overview-heading"><h2>照片提交概览</h2><span>全部历史 · 按照片计数</span></div>', unsafe_allow_html=True)
         metrics = st.columns(4)
         for column, label, key in zip(metrics[:3], ("总打卡数", "有效打卡数", "异常 / 待核验"), ("total", "valid", "invalid")):
             column.metric(label, stats[key])
         metrics[3].metric("疑似重复", store.count_records(duplicate_status="疑似重复"))
-    st.caption("按照片提交计数；有效表示基础校验通过，疑似重复单独统计，需人工核验。")
+    st.caption("有效表示基础校验通过；疑似重复单独统计，需人工核验。按日期和班级统计人数，请切换“学生考勤”。")
 
 
 def dashboard(store):
@@ -322,8 +326,9 @@ def dashboard(store):
             st.info("还没有打卡记录。请在左侧保存邮箱配置，收到学生照片后点击“一键拉取并校验”。")
         return
     with st.container(key="record_workspace", border=True):
-        table, preview = st.columns([1.9, 1], gap="large")
+        table, preview = st.columns([1.65, 1], gap="large")
         with table:
+            st.markdown('<h3 class="attendance-panel-title">提交记录</h3>', unsafe_allow_html=True)
             frame = pd.DataFrame(rows)
             frame["校验结果"] = frame["is_valid"].map({True: "有效", False: "无效"})
             names = {"id": "编号", "student_id": "学号", "student_name": "姓名", "email_time": "收件时间",
@@ -347,7 +352,7 @@ def dashboard(store):
                                         "学号": st.column_config.TextColumn(width=110)})
             st.caption("默认显示常用信息；可在表格工具栏中显示更多列。在照片预览区选择记录查看原图。")
         with preview, st.container(key="photo_review"):
-            st.markdown("**照片预览**")
+            st.markdown('<h3 class="attendance-panel-title">照片预览</h3>', unsafe_allow_html=True)
             record_ids = [row["id"] for row in rows]
             if st.session_state.get("photo_record") not in record_ids:
                 st.session_state["photo_record"] = record_ids[0]
@@ -355,6 +360,9 @@ def dashboard(store):
                                        format_func=lambda value: next(f"{row['student_id']} · {row['student_name']}（#{value}）"
                                                                       for row in rows if row["id"] == value))
             selected = next(row for row in rows if row["id"] == selected_id)
+            photo_verdict(selected["is_valid"], selected["reason"])
+            if selected["duplicate_status"] in ("疑似重复", "校验异常"):
+                st.warning(selected["duplicate_reason"])
             photo = safe_photo_path(selected.get("photo_path"), WORK_DIR)
             if photo is None:
                 photo_placeholder()
@@ -362,10 +370,10 @@ def dashboard(store):
             else:
                 try:
                     with st.spinner("正在加载照片…"):
-                        st.image(str(photo), caption=selected["photo_name"], width="stretch")
+                        st.image(str(photo), caption=selected["photo_name"], width="stretch",
+                                 alt=f"{selected['student_name']}提交的考勤照片：{selected['photo_name']}")
                 except Exception as error:
                     show_error("照片预览", error)
-            st.caption(selected["reason"])
             with st.expander("查看照片校验详情"):
                 st.write("照片：", selected["photo_name"])
                 st.write("软件校验：", selected["software_check"])
@@ -375,8 +383,6 @@ def dashboard(store):
                 st.caption(f"照片指纹：{selected['photo_phash'] or '未计算'}")
             if selected.get("phash_status") == "校验异常":
                 st.warning(selected.get("phash_reason") or "pHash 计算异常，请人工核验。")
-            if selected["duplicate_status"] in ("疑似重复", "校验异常"):
-                st.warning(selected["duplicate_reason"])
             if selected.get("duplicate_record_id") is not None:
                 related = store.get_record(selected["duplicate_record_id"])
                 if related is None:
@@ -391,7 +397,8 @@ def dashboard(store):
                     else:
                         try:
                             with st.spinner("正在加载相似历史照片…"):
-                                st.image(str(related_photo), caption=related["photo_name"], width="stretch")
+                                st.image(str(related_photo), caption=related["photo_name"], width="stretch",
+                                         alt=f"关联历史考勤照片：{related['photo_name']}")
                         except Exception as error:
                             show_error("历史照片预览", error)
 
